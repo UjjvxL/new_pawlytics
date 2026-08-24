@@ -1,14 +1,18 @@
 # Pawlytics
 
-A mobile-first dog-sighting safety map for India. It supports Google login, verified community reports, photo and speech input, live Firestore hotspots, and walking routes ranked to reduce exposure to active sightings.
+A mobile-first dog-sighting safety map. It supports Google login, verified community reports, photo and multilingual speech input, live Firestore hotspots, and walking routes ranked to reduce exposure to active sightings.
 
 ## What works
 
 - Google authentication through Firebase Auth
-- Google Maps with current location, India-focused destination search, walking directions, and alternative-route risk scoring
+- Google Maps with current location, destination suggestions, walking directions, alternative-route risk scoring, and exact-route handoff to Google Maps
 - Photo capture/upload, Web Speech API dictation, location and timestamp metadata
 - Server-side Gemini 3.6 Flash image/report verification; the API key never enters the browser
 - Firestore live updates and Cloud Storage images
+- Report lifecycle history with AI result details, map links, and downloadable receipts
+- Explainable 250 m yellow/red hotspot zones and a manual dog-placement route tester at `/?test=1`
+- WHO-aligned bite first aid and a location-aware Google Maps handoff for nearby rabies care
+- Installable PWA shell with offline status and cached app fallback
 - Rules that let signed-in users create pending reports but never approve their own reports
 
 ## 1. Create Firebase and get the frontend keys

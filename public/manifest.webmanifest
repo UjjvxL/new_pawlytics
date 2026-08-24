@@ -1,0 +1,17 @@
+{
+  "name": "Pawlytics — Safer Walking Routes",
+  "short_name": "Pawlytics",
+  "description": "Community dog sightings, AI verification, and safer walking routes.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#e9eeeb",
+  "theme_color": "#136f63",
+  "icons": [
+    { "src": "/pawlytics-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Test safe routing", "short_name": "Route test", "url": "/?test=1" }
+  ]
+}

@@ -3,7 +3,7 @@ import { Loader } from '@googlemaps/js-api-loader'
 import { addDoc, collection, onSnapshot, query, serverTimestamp, updateDoc, where } from 'firebase/firestore'
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 import { getRedirectResult, onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut, type User } from 'firebase/auth'
-import { AlertTriangle, ArrowLeft, Bell, Camera, Crosshair, LogOut, MapPin, Mic, Navigation, Plus, Search, ShieldCheck, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Bell, Camera, Crosshair, Download, ExternalLink, HeartPulse, LogOut, MapPin, Mic, Navigation, Plus, Search, ShieldCheck, WifiOff, X } from 'lucide-react'
 import { auth, db, isFirebaseConfigured, provider, storage } from './firebase'
 import type { Severity, Sighting } from './types'
 
@@ -71,6 +71,8 @@ export default function App() {
   const [notice, setNotice] = useState('')
   const [myReports, setMyReports] = useState<Sighting[]>([])
   const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const [safetyOpen, setSafetyOpen] = useState(false)
+  const [online, setOnline] = useState(navigator.onLine)
   const [navigation, setNavigation] = useState<NavigationInfo | null>(null)
   const [navigationActive, setNavigationActive] = useState(false)
   const [stepsOpen, setStepsOpen] = useState(false)
@@ -82,6 +84,11 @@ export default function App() {
   useEffect(() => {
     getRedirectResult(auth).catch(() => setNotice('Google sign-in could not be completed. Please retry.'))
     return onAuthStateChanged(auth, setUser)
+  }, [])
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine)
+    window.addEventListener('online', update); window.addEventListener('offline', update)
+    return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update) }
   }, [])
   useEffect(() => {
     if (!user) { setMyReports([]); return }
@@ -215,7 +222,8 @@ export default function App() {
       <div className="brand"><div className="brand-mark">P</div><span>Pawlytics</span></div>
       {user ? <div className="profile-actions"><button className="notification-button" onClick={()=>setNotificationsOpen(v=>!v)} aria-label="Report notifications"><Bell size={20}/>{myReports.some(r=>r.verificationStatus==='pending')&&<i/>}</button><button className="avatar-button" onClick={() => signOut(auth)} title="Sign out">{user.photoURL ? <img src={user.photoURL} /> : <LogOut size={18} />}</button></div> : <button className="login-button" onClick={login}>Sign in</button>}
     </header>
-    {notificationsOpen && user && <section className="notification-panel"><header><strong>Report updates</strong><button onClick={()=>setNotificationsOpen(false)}><X size={17}/></button></header>{myReports.length===0?<p>No reports yet.</p>:myReports.map(r=><article key={r.id}><span className={`status-dot ${r.verificationStatus}`}/><div><strong>{r.verificationStatus==='pending'?'Gemini is verifying…':r.verificationStatus==='approved'?'Report accepted':'Report rejected'}</strong><p>{r.verificationStatus==='pending'?'You can close the app. We’ll update this result here.':r.aiReason||r.description}</p><small>{sightingDate(r.createdAt).toLocaleString()}</small></div></article>)}</section>}
+    {notificationsOpen && user && <ReportsPanel reports={myReports} close={()=>setNotificationsOpen(false)}/>}
+    {!online && <div className="offline-chip"><WifiOff size={14}/>Offline · saved map shell only</div>}
 
     <button className="search-bar" onClick={() => setRouteOpen(true)}><Search size={20}/><span>Where do you want to go?</span></button>
     <div className="map-actions"><button className={following && location ? 'following' : ''} onClick={() => locate()} aria-label="My location"><Crosshair size={21}/></button></div>
@@ -228,12 +236,14 @@ export default function App() {
     {navigation && <section className={stepsOpen ? 'navigation-card expanded' : 'navigation-card'}><button className="card-close" onClick={() => { renderer.current?.set('directions', null); setNavigation(null); setNavigationActive(false); setStepsOpen(false) }}><X size={18}/></button><div className="nav-summary"><div className="nav-eta">{navigation.duration}</div><div className="nav-details"><strong>{navigation.destination}</strong><span>{navigation.distance} · {navigation.risk === 0 ? 'No active hotspots on route' : `${navigation.risk} risk points on ${navigation.safetyEnabled ? 'safest' : 'default'} route`}</span>{navigation.avoidedRisk > 0 && <em>Shield avoided {navigation.avoidedRisk} danger-risk points</em>}<small dangerouslySetInnerHTML={{ __html: navigation.firstStep }}/></div></div><div className="nav-controls"><a className="google-maps-start" href={navigation.googleMapsUrl} target="_blank" rel="noreferrer" aria-label="Start this route in Google Maps"><Navigation size={18}/><span>Start in Google Maps</span></a><button onClick={() => setStepsOpen(v => !v)}>{stepsOpen ? 'Hide steps' : 'Preview steps'}</button></div>{stepsOpen && <ol className="step-list">{navigation.steps.map((step, i) => <li key={i}><span>{i + 1}</span><div><p dangerouslySetInnerHTML={{ __html: step.instruction }}/><small>{step.distance} · {step.duration}</small></div></li>)}</ol>}</section>}
     <nav className={navigation ? 'bottom-actions route-active' : 'bottom-actions'}>
       <button className="navigate-button" onClick={() => setRouteOpen(true)}><Navigation size={22} fill="currentColor"/>Navigate safely</button>
+      <button className="safety-button" onClick={() => setSafetyOpen(true)}><HeartPulse size={22}/><span>Safety</span></button>
       <button className="report-button" onClick={() => user ? setReportOpen(true) : login()}><Plus size={25}/><span>Report</span></button>
     </nav>
 
     {notice && <div className="toast" role="status">{notice}<button onClick={() => setNotice('')}><X size={16}/></button></div>}
     {routeOpen && <RouteSheet map={map.current} renderer={renderer.current} sightings={activeRisk} currentLocation={location} locate={locate} close={() => setRouteOpen(false)} setNotice={setNotice} setNavigation={setNavigation} safeRouting={safeRouting} onRouteReady={fn => { reroute.current = fn }}/>} 
     {reportOpen && user && <ReportSheet user={user} initialLocation={location} locate={locate} close={() => setReportOpen(false)} onStatus={setNotice}/>} 
+    {safetyOpen && <SafetySheet location={location} close={()=>setSafetyOpen(false)}/>}
     {selected && <HotspotCard hotspot={selected} close={() => setSelected(null)}/>} 
   </main>
 }
@@ -342,14 +352,16 @@ function ReportSheet({ user, initialLocation, locate, close, onStatus }: { user:
   const [photoSource, setPhotoSource] = useState<'camera'|'library'>('library')
   const [preview, setPreview] = useState('')
   const [listening, setListening] = useState(false)
+  const [speechLanguage, setSpeechLanguage] = useState(navigator.language.startsWith('fr') ? 'fr-CA' : navigator.language.startsWith('hi') ? 'hi-IN' : 'en-CA')
   const [saving, setSaving] = useState(false)
   const [stage, setStage] = useState('')
   function dictate() {
     const SpeechRecognition = (window as unknown as { SpeechRecognition?: new () => any, webkitSpeechRecognition?: new () => any }).SpeechRecognition || (window as unknown as { webkitSpeechRecognition?: new () => any }).webkitSpeechRecognition
     if (!SpeechRecognition) return onStatus('Speech-to-text is not supported in this browser.')
-    const recognition = new SpeechRecognition(); recognition.lang = 'en-IN'; recognition.interimResults = true
+    const recognition = new SpeechRecognition(); recognition.lang = speechLanguage; recognition.interimResults = true
     recognition.onstart = () => setListening(true); recognition.onend = () => setListening(false)
-    recognition.onresult = (e: any) => setDescription(Array.from(e.results).map((r: any) => r[0].transcript).join(''))
+    recognition.onerror = () => { setListening(false); onStatus('Voice input stopped. Check microphone permission and try again.') }
+    recognition.onresult = (e: any) => setDescription(Array.from(e.results).map((r: any) => r[0].transcript).join(' '))
     recognition.start()
   }
   async function submit(e: React.FormEvent) {
@@ -376,7 +388,7 @@ function ReportSheet({ user, initialLocation, locate, close, onStatus }: { user:
     } catch (err) { console.error(err); const code = typeof err === 'object' && err && 'code' in err ? String(err.code) : ''; const message = err instanceof Error ? err.message : ''; onStatus(message === 'PHOTO_TOO_LARGE' ? 'That photo is too large. Choose a smaller image.' : code.includes('unauthenticated') ? 'Your session expired. Sign in again and retry.' : code.includes('permission-denied') || code.includes('unauthorized') ? 'Upload permission was denied. Sign out, sign in, and retry.' : `Submission stopped during “${currentStage}”. ${code || message || 'Please retry.'}`) } finally { setSaving(false); setStage('') }
   }
   return <div className="scrim"><section className="sheet report-sheet"><div className="sheet-handle"/><div className="sheet-title"><button onClick={close}><X/></button><div><h2>Report a dog sighting</h2><p>Your report will be checked by AI</p></div></div><form onSubmit={submit}>
-    <label className="field-label">What is happening?</label><div className="textarea-wrap"><textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Example: Three street dogs are barking and chasing cyclists near the gate…" maxLength={500}/><button type="button" className={listening ? 'mic active' : 'mic'} onClick={dictate}><Mic size={20}/></button></div>
+    <div className="voice-heading"><label className="field-label">What is happening?</label><select value={speechLanguage} onChange={e=>setSpeechLanguage(e.target.value)} aria-label="Voice language"><option value="en-CA">English (Canada)</option><option value="en-IN">English (India)</option><option value="hi-IN">हिन्दी</option><option value="mr-IN">मराठी</option><option value="fr-CA">Français</option></select></div><div className="textarea-wrap"><textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Example: Three street dogs are barking and chasing cyclists near the gate…" maxLength={500}/><button type="button" className={listening ? 'mic active' : 'mic'} onClick={dictate} aria-label={`Dictate report in ${speechLanguage}`}><Mic size={20}/></button></div>
     <label className="field-label">How risky does it feel?</label><div className="severity-picker">{(['low','medium','high'] as Severity[]).map(v => <button type="button" key={v} className={severity === v ? `selected ${v}` : ''} onClick={() => setSeverity(v)}>{v === 'low' ? 'Calm' : v === 'medium' ? 'Alert' : 'Danger'}</button>)}</div>
     <div className={preview ? 'photo-picker has-photo' : 'photo-picker'}>{preview ? <img src={preview}/> : <><Camera size={30}/><strong>Add a current photo</strong><span>Original GPS metadata helps verify the location</span></>}</div>
     <div className="photo-actions"><label><Camera size={18}/>Take photo<input type="file" accept="image/*" capture="environment" onChange={e => { const f=e.target.files?.[0]; if(f){setPhotoSource('camera');setPhoto(f);setPreview(URL.createObjectURL(f))} }}/></label><label><Plus size={18}/>Photo library<input type="file" accept="image/*" onChange={e => { const f=e.target.files?.[0]; if(f){setPhotoSource('library');setPhoto(f);setPreview(URL.createObjectURL(f))} }}/></label></div>
@@ -391,5 +403,19 @@ function HotspotCard({ hotspot, close }: { hotspot: Hotspot, close: () => void }
   const report = hotspot.reports[reportIndex]
   const ageMinutes = Math.max(0, Math.round((Date.now() - sightingDate(report.createdAt).getTime()) / 60000))
   const age = ageMinutes < 60 ? `${ageMinutes} min ago` : `${Math.round(ageMinutes/60)} hr ago`
-  return <section className="sighting-card hotspot-card"><button className="card-close" onClick={close}><X size={18}/></button><header><span className={`risk-label ${hotspot.severity}`}><AlertTriangle size={14}/>{hotspot.totalDogs >= 5 ? 'Red zone' : 'Yellow zone'}</span><h3>{hotspot.totalDogs} dogs reported within 250 m</h3><p>{hotspot.reports.length} verified report{hotspot.reports.length===1?'':'s'} · Last seen {age}</p></header>{hotspot.reports.length > 1 && <div className="report-tabs">{hotspot.reports.map((_,i)=><button className={i===reportIndex?'active':''} key={i} onClick={()=>setReportIndex(i)}>{i+1}</button>)}</div>}<div className="report-detail">{report.imageUrl ? <img src={report.imageUrl} alt="Verified dog report"/> : <div className="no-photo">🐕</div>}<div><strong>{report.dogCount || 1} dog{(report.dogCount||1)===1?'':'s'} · {report.observedBehavior || report.severity}</strong><p>{report.aiSummary || report.description}</p><dl><div><dt>Reported</dt><dd>{sightingDate(report.createdAt).toLocaleString()}</dd></div><div><dt>Location</dt><dd>{report.lat.toFixed(5)}, {report.lng.toFixed(5)}</dd></div><div><dt>Evidence</dt><dd>{report.locationEvidence || 'AI verified'}{report.aiConfidence ? ` · ${Math.round(report.aiConfidence*100)}% confidence` : ''}</dd></div></dl>{report.testOnly && <small className="test-label">Developer test report</small>}</div></div><footer>Stay alert and give street dogs space. Conditions can change quickly.</footer></section>
+  return <section className="sighting-card hotspot-card"><button className="card-close" onClick={close}><X size={18}/></button><header><span className={`risk-label ${hotspot.severity}`}><AlertTriangle size={14}/>{hotspot.totalDogs >= 5 ? 'Red zone' : 'Yellow zone'}</span><h3>{hotspot.totalDogs} dogs reported within 250 m</h3><p>{hotspot.reports.length} verified report{hotspot.reports.length===1?'':'s'} · Last seen {age}</p><div className="risk-explanation"><ShieldCheck size={15}/><span><strong>Why this risk:</strong> {hotspot.totalDogs >= 5 ? 'a pack of 5+ dogs is active in this zone' : 'recent verified dog activity is inside the route buffer'}. Confidence: {hotspot.reports.length >= 3 ? 'high' : hotspot.reports.length === 2 ? 'moderate' : 'limited'}.</span></div></header>{hotspot.reports.length > 1 && <div className="report-tabs">{hotspot.reports.map((_,i)=><button className={i===reportIndex?'active':''} key={i} onClick={()=>setReportIndex(i)}>{i+1}</button>)}</div>}<div className="report-detail">{report.imageUrl ? <img src={report.imageUrl} alt="Verified dog report"/> : <div className="no-photo">🐕</div>}<div><strong>{report.dogCount || 1} dog{(report.dogCount||1)===1?'':'s'} · {report.observedBehavior || report.severity}</strong><p>{report.aiSummary || report.description}</p><dl><div><dt>Reported</dt><dd>{sightingDate(report.createdAt).toLocaleString()}</dd></div><div><dt>Location</dt><dd>{report.lat.toFixed(5)}, {report.lng.toFixed(5)}</dd></div><div><dt>Evidence</dt><dd>{report.locationEvidence || 'AI verified'}{report.aiConfidence ? ` · ${Math.round(report.aiConfidence*100)}% confidence` : ''}</dd></div></dl>{report.testOnly && <small className="test-label">Developer test report</small>}</div></div><footer>Stay alert and give street dogs space. Conditions can change quickly.</footer></section>
+}
+
+function ReportsPanel({ reports, close }: { reports:Sighting[], close:()=>void }) {
+  const approved = reports.filter(r=>r.verificationStatus==='approved').length
+  function downloadReceipt(report:Sighting) {
+    const receipt = { reportId:report.id, status:report.verificationStatus, submittedAt:sightingDate(report.createdAt).toISOString(), location:{lat:report.lat,lng:report.lng}, description:report.description, aiSummary:report.aiSummary, aiConfidence:report.aiConfidence, evidence:report.locationEvidence }
+    const url=URL.createObjectURL(new Blob([JSON.stringify(receipt,null,2)],{type:'application/json'})); const link=document.createElement('a'); link.href=url; link.download=`pawlytics-${report.id}.json`; link.click(); URL.revokeObjectURL(url)
+  }
+  return <section className="notification-panel reports-panel"><header><div><strong>My reports</strong><small>{reports.length} submitted · {approved} verified</small></div><button onClick={close}><X size={17}/></button></header>{reports.length===0?<p>No reports yet.</p>:reports.map(r=><article key={r.id}>{r.imageUrl&&<img src={r.imageUrl} alt="Report evidence"/>}<span className={`status-dot ${r.verificationStatus}`}/><div><strong>{r.verificationStatus==='pending'?'Gemini verification in progress':r.verificationStatus==='approved'?'Verified and protecting routes':'Not added to the map'}</strong><p>{r.verificationStatus==='pending'?'Your upload is safely queued. You can close Pawlytics.':r.aiReason||r.aiSummary||r.description}</p><small>{sightingDate(r.createdAt).toLocaleString()} · {r.lat?.toFixed(4)}, {r.lng?.toFixed(4)}</small><div className="report-links"><a href={`https://www.google.com/maps/search/?api=1&query=${r.lat},${r.lng}`} target="_blank" rel="noreferrer"><MapPin size={12}/>Map</a><button onClick={()=>downloadReceipt(r)}><Download size={12}/>Receipt</button></div></div></article>)}</section>
+}
+
+function SafetySheet({ location, close }: { location:google.maps.LatLngLiteral|null, close:()=>void }) {
+  const query = location ? `anti-rabies vaccine clinic near ${location.lat},${location.lng}` : 'anti-rabies vaccine clinic near me'
+  return <div className="scrim"><section className="sheet safety-sheet"><div className="sheet-handle"/><div className="sheet-title"><button onClick={close}><X/></button><div><h2>Dog safety & bite help</h2><p>Fast guidance when every minute matters</p></div></div><div className="emergency-card"><HeartPulse/><div><strong>Bitten or scratched?</strong><p>Wash and flush every wound with soap and running water for at least 15 minutes. Seek urgent medical care immediately for rabies post-exposure assessment—do not wait for symptoms.</p></div></div><ol className="first-aid"><li><b>1</b><span><strong>Wash for 15 minutes</strong>Use plenty of soap and running water.</span></li><li><b>2</b><span><strong>Apply antiseptic if available</strong>Use an iodine-containing or similarly virucidal preparation.</span></li><li><b>3</b><span><strong>Get medical care now</strong>A clinician must assess rabies vaccine and immunoglobulin needs.</span></li></ol><a className="care-link" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`} target="_blank" rel="noreferrer"><MapPin/>Find nearby rabies care in Google Maps<ExternalLink size={16}/></a><section className="approach-guide"><h3>If a dog approaches</h3><p>Stay calm. Do not run, scream, stare directly, or make sudden movements. Stand sideways, keep your arms still, and slowly create distance. Use a bag or umbrella as a barrier if needed.</p></section><p className="medical-note">Emergency numbers vary by country. Call local emergency services for severe bleeding, injuries, or immediate danger. This guide does not replace professional medical care.</p><a className="who-link" href="https://www.who.int/news-room/fact-sheets/detail/rabies" target="_blank" rel="noreferrer">WHO rabies guidance <ExternalLink size={13}/></a></section></div>
 }
