@@ -561,6 +561,7 @@ export default function App() {
               {myReports.some((r) =>
                 [
                   "uploading",
+                  "uploaded",
                   "automated_review",
                   "review_required",
                   "pending",
@@ -1170,8 +1171,24 @@ function ReviewPanel({
 }) {
   const [reason, setReason] = useState(""),
     [busy, setBusy] = useState(false);
-  const [evidenceUrl,setEvidenceUrl]=useState(""),[evidenceError,setEvidenceError]=useState("");
-  useEffect(()=>{let active=true;void httpsCallable(functions,"getReportEvidenceUrl")({organizationId,reportId:report.id}).then(result=>{if(active)setEvidenceUrl((result.data as {url:string}).url)}).catch(()=>{if(active)setEvidenceError("Evidence image could not be loaded.")});return()=>{active=false}},[organizationId,report.id]);
+  const [evidenceUrl, setEvidenceUrl] = useState(""),
+    [evidenceError, setEvidenceError] = useState("");
+  useEffect(() => {
+    let active = true;
+    void httpsCallable(
+      functions,
+      "getReportEvidenceUrl",
+    )({ organizationId, reportId: report.id })
+      .then((result) => {
+        if (active) setEvidenceUrl((result.data as { url: string }).url);
+      })
+      .catch(() => {
+        if (active) setEvidenceError("Evidence image could not be loaded.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [organizationId, report.id]);
   async function decide(decision: "confirmed" | "rejected" | "duplicate") {
     if (reason.trim().length < 5)
       return onStatus("Add a clear decision reason.");
@@ -1198,7 +1215,13 @@ function ReviewPanel({
         {report.verificationStatus}
       </span>
       <h2>Review report {report.id.slice(0, 8)}</h2>
-      <div className="review-evidence">{evidenceUrl?<img src={evidenceUrl} alt="Original report evidence"/>:<div>{evidenceError||"Loading original evidence…"}</div>}</div>
+      <div className="review-evidence">
+        {evidenceUrl ? (
+          <img src={evidenceUrl} alt="Original report evidence" />
+        ) : (
+          <div>{evidenceError || "Loading original evidence…"}</div>
+        )}
+      </div>
       <p>{report.description}</p>
       <dl>
         <div>
@@ -1223,7 +1246,9 @@ function ReviewPanel({
         </div>
         <div>
           <dt>Reported / detected severity</dt>
-          <dd>{report.severity} / {report.observedSeverity || "unavailable"}</dd>
+          <dd>
+            {report.severity} / {report.observedSeverity || "unavailable"}
+          </dd>
         </div>
         <div>
           <dt>Detected behaviour</dt>
@@ -1231,15 +1256,30 @@ function ReviewPanel({
         </div>
         <div>
           <dt>Location evidence</dt>
-          <dd>{report.locationEvidence || "Pending"}{report.photoDistanceMetres != null ? ` · ${Math.round(report.photoDistanceMetres)} m from report` : ""}</dd>
+          <dd>
+            {report.locationEvidence || "Pending"}
+            {report.photoDistanceMetres != null
+              ? ` · ${Math.round(report.photoDistanceMetres)} m from report`
+              : ""}
+          </dd>
         </div>
         <div>
           <dt>Time evidence</dt>
-          <dd>{report.timeEvidence || "Pending"}{report.photoCapturedAt ? ` · ${sightingDate(report.photoCapturedAt).toLocaleString()}` : ""}</dd>
+          <dd>
+            {report.timeEvidence || "Pending"}
+            {report.photoCapturedAt
+              ? ` · ${sightingDate(report.photoCapturedAt).toLocaleString()}`
+              : ""}
+          </dd>
         </div>
         <div>
           <dt>Source / manipulation check</dt>
-          <dd>{report.photoSource || "unknown"} · {report.manipulationLikely ? "possible manipulation" : "no manipulation detected"}</dd>
+          <dd>
+            {report.photoSource || "unknown"} ·{" "}
+            {report.manipulationLikely
+              ? "possible manipulation"
+              : "no manipulation detected"}
+          </dd>
         </div>
         <div>
           <dt>Coordinates</dt>
@@ -1253,7 +1293,14 @@ function ReviewPanel({
         </div>
         <div>
           <dt>Pipeline decision</dt>
-          <dd>{report.decisionSource?.replace(/_/g," ") || report.processingStatus || "pending"}{report.evidenceQuality ? ` · ${report.evidenceQuality} evidence` : ""}</dd>
+          <dd>
+            {report.decisionSource?.replace(/_/g, " ") ||
+              report.processingStatus ||
+              "pending"}
+            {report.evidenceQuality
+              ? ` · ${report.evidenceQuality} evidence`
+              : ""}
+          </dd>
         </div>
       </dl>
       <label>
@@ -1892,13 +1939,27 @@ function AccountSheet({
         </section>
         <section className="account-section">
           <h3>Your data</h3>
-          <p>Download a copy, or schedule deletion with a seven-day recovery period.</p>
+          <p>
+            Download a copy, or schedule deletion with a seven-day recovery
+            period.
+          </p>
           <div className="data-actions">
-            <button onClick={exportData} disabled={busy}><Download />Export my data</button>
+            <button onClick={exportData} disabled={busy}>
+              <Download />
+              Export my data
+            </button>
             {profile.contributionStatus === "suspended" ? (
-              <button onClick={cancelDeletion} disabled={busy}>Cancel deletion</button>
+              <button onClick={cancelDeletion} disabled={busy}>
+                Cancel deletion
+              </button>
             ) : (
-              <button className="danger-action" onClick={requestDeletion} disabled={busy}>Delete account</button>
+              <button
+                className="danger-action"
+                onClick={requestDeletion}
+                disabled={busy}
+              >
+                Delete account
+              </button>
             )}
           </div>
         </section>
@@ -2272,8 +2333,14 @@ function ReportSheet({
   );
   const [saving, setSaving] = useState(false);
   const [stage, setStage] = useState("");
-  const uploadSteps = ["Location", "Secure report", "Prepare photo", "Upload", "AI queue"];
-  const stageNumber = stage.includes("location") ? 1 : stage.includes("secure") ? 2 : stage.includes("Preparing") ? 3 : stage.includes("Uploading") ? 4 : stage.includes("Queuing") ? 5 : 0;
+  const [stageNumber, setStageNumber] = useState(0);
+  const uploadSteps = [
+    "Report created",
+    "Image uploaded",
+    "Metadata parsed",
+    "AI analysis",
+    "Decision",
+  ];
   function dictate() {
     const SpeechRecognition =
       (
@@ -2334,28 +2401,75 @@ function ReportSheet({
       const { reportId } = session.data as {
         reportId: string;
       };
+      setStageNumber(1);
       currentStage = "Preparing photo…";
       setStage(currentStage);
       const preparedPhoto = await optimizePhoto(photo);
       if (preparedPhoto.size > 10 * 1024 * 1024)
         throw new Error("PHOTO_TOO_LARGE");
-      currentStage = "Uploading photo…";
+      currentStage = "Uploading and securely storing image…";
       setStage(currentStage);
       const imageBase64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onerror = () => reject(new Error("PHOTO_READ_FAILED"));
-        reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+        reader.onload = () =>
+          resolve(String(reader.result).split(",")[1] || "");
         reader.readAsDataURL(preparedPhoto);
       });
-      currentStage = "Queuing verification…";
-      setStage(currentStage);
       await httpsCallable(
         functions,
         "uploadReportEvidence",
       )({ reportId, imageBase64, contentType: preparedPhoto.type });
+      setStageNumber(2);
+      currentStage = "Image uploaded. Parsing GPS, time and file metadata…";
+      setStage(currentStage);
+      await httpsCallable(functions, "prepareReportVerification")({ reportId });
+      setStageNumber(3);
+      currentStage = "Metadata parsed. Gemini is analyzing the evidence…";
+      setStage(currentStage);
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const timeout = window.setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            stop();
+            reject(new Error("AI_CONTINUING"));
+          }
+        }, 90_000);
+        const stop = onSnapshot(
+          doc(db, "reports", reportId),
+          (snap) => {
+            const status = (snap.data() as Sighting | undefined)
+              ?.verificationStatus;
+            if (
+              status &&
+              ![
+                "uploading",
+                "uploaded",
+                "automated_review",
+                "pending",
+              ].includes(status)
+            ) {
+              settled = true;
+              window.clearTimeout(timeout);
+              stop();
+              setStageNumber(5);
+              setStage(
+                status === "provisional" || status === "confirmed"
+                  ? "AI verification complete — sighting added to the map."
+                  : status === "review_required"
+                    ? "AI checks complete — specialist review required."
+                    : `Verification complete: ${status}.`,
+              );
+              window.setTimeout(resolve, 900);
+            }
+          },
+          reject,
+        );
+      });
       close();
       onStatus(
-        "Report submitted. Gemini will verify it in the background—check the bell for the result.",
+        "Verification completed. Open the bell to see the full decision.",
       );
     } catch (err) {
       console.error(err);
@@ -2370,7 +2484,9 @@ function ReportSheet({
             : code.includes("permission-denied") ||
                 code.includes("unauthorized")
               ? "Upload permission was denied. Sign out, sign in, and retry."
-              : `Submission stopped during “${currentStage}”. ${code || message || "Please retry."}`,
+              : message === "AI_CONTINUING"
+                ? "Image and metadata are confirmed. AI is still working in the background; check the bell for the result."
+                : `Submission stopped during “${currentStage}”. ${code || message || "Please retry."}`,
       );
     } finally {
       setSaving(false);
@@ -2391,7 +2507,33 @@ function ReportSheet({
           </div>
         </div>
         <form onSubmit={submit}>
-          {saving && <div className="report-progress" role="status" aria-live="polite"><div className="verification-orbit"><ShieldCheck size={25}/><i/></div><strong>{stage}</strong><span>Keep Pawlytics open until the upload finishes.</span><ol>{uploadSteps.map((label,index)=><li key={label} className={index+1<stageNumber?'done':index+1===stageNumber?'active':''}><i>{index+1<stageNumber?'✓':index+1}</i><small>{label}</small></li>)}</ol></div>}
+          {saving && (
+            <div className="report-progress" role="status" aria-live="polite">
+              <div className="verification-orbit">
+                <ShieldCheck size={25} />
+                <i />
+              </div>
+              <strong>{stage}</strong>
+              <span>Every checkmark below is confirmed by the server.</span>
+              <ol>
+                {uploadSteps.map((label, index) => (
+                  <li
+                    key={label}
+                    className={
+                      index < stageNumber
+                        ? "done"
+                        : index === stageNumber
+                          ? "active"
+                          : ""
+                    }
+                  >
+                    <i>{index < stageNumber ? "✓" : index + 1}</i>
+                    <small>{label}</small>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
           <div className="voice-heading">
             <label className="field-label">What is happening?</label>
             <select
@@ -2644,9 +2786,7 @@ function ReportsPanel({
     URL.revokeObjectURL(url);
   }
   const pending = (status: Sighting["verificationStatus"]) =>
-    ["uploading", "automated_review", "pending"].includes(
-      status,
-    );
+    ["uploading", "uploaded", "automated_review", "pending"].includes(status);
   const protecting = (status: Sighting["verificationStatus"]) =>
     ["provisional", "confirmed", "approved"].includes(status);
   return (
@@ -2680,11 +2820,11 @@ function ReportsPanel({
                     ? "Confirmed and protecting routes"
                     : r.verificationStatus === "review_required"
                       ? "Sent to a human safety reviewer"
-                    : r.verificationStatus === "uploading"
-                      ? "Photo upload did not finish"
-                    : pending(r.verificationStatus)
-                      ? "Verification in progress"
-                      : "Not added to the map"}
+                      : r.verificationStatus === "uploading"
+                        ? "Photo upload did not finish"
+                        : pending(r.verificationStatus)
+                          ? "Verification in progress"
+                          : "Not added to the map"}
               </strong>
               <p>
                 {r.verificationStatus === "automated_review"
@@ -2693,12 +2833,44 @@ function ReportsPanel({
                     ? "Automated checks finished, but a person must make the final decision."
                     : r.verificationStatus === "uploading"
                       ? "The evidence is not queued. Submit a new report; incomplete uploads expire automatically."
-                  : pending(r.verificationStatus)
-                    ? "Your evidence is safely queued. You can close Pawlytics."
-                  : r.aiReason || r.aiSummary || r.description}
+                      : pending(r.verificationStatus)
+                        ? "Your evidence is safely queued. You can close Pawlytics."
+                        : r.aiReason || r.aiSummary || r.description}
               </p>
-              <div className="verification-timeline" aria-label="Verification progress">
-                <i className="done"/><i className={r.verificationStatus==='uploading'?'':'done'}/><i className={['provisional','confirmed','approved','review_required','rejected','duplicate'].includes(r.verificationStatus)?'done':r.verificationStatus==='automated_review'?'active':''}/><i className={protecting(r.verificationStatus)||['rejected','duplicate'].includes(r.verificationStatus)?'done':r.verificationStatus==='review_required'?'active':''}/>
+              <div
+                className="verification-timeline"
+                aria-label="Verification progress"
+              >
+                <i className="done" />
+                <i
+                  className={r.verificationStatus === "uploading" ? "" : "done"}
+                />
+                <i
+                  className={
+                    [
+                      "provisional",
+                      "confirmed",
+                      "approved",
+                      "review_required",
+                      "rejected",
+                      "duplicate",
+                    ].includes(r.verificationStatus)
+                      ? "done"
+                      : r.verificationStatus === "automated_review"
+                        ? "active"
+                        : ""
+                  }
+                />
+                <i
+                  className={
+                    protecting(r.verificationStatus) ||
+                    ["rejected", "duplicate"].includes(r.verificationStatus)
+                      ? "done"
+                      : r.verificationStatus === "review_required"
+                        ? "active"
+                        : ""
+                  }
+                />
               </div>
               <small>
                 {sightingDate(r.createdAt).toLocaleString()} ·{" "}

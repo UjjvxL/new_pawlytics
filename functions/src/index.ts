@@ -1,129 +1,1633 @@
-import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai'
-import { createHash, randomBytes, randomUUID } from 'node:crypto'
-import exifr from 'exifr'
-import { initializeApp } from 'firebase-admin/app'
-import { getAuth } from 'firebase-admin/auth'
-import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
-import { getStorage } from 'firebase-admin/storage'
-import { HttpsError, onCall } from 'firebase-functions/v2/https'
-import { onDocumentUpdated } from 'firebase-functions/v2/firestore'
-import { onSchedule } from 'firebase-functions/v2/scheduler'
-import { defineSecret } from 'firebase-functions/params'
-import { logger } from 'firebase-functions'
-import sharp from 'sharp'
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import exifr from "exifr";
+import { initializeApp } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
+import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
+import { getStorage } from "firebase-admin/storage";
+import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { onDocumentUpdated } from "firebase-functions/v2/firestore";
+import { onSchedule } from "firebase-functions/v2/scheduler";
+import { defineSecret } from "firebase-functions/params";
+import { logger } from "firebase-functions";
+import sharp from "sharp";
 
-initializeApp()
-const db = getFirestore()
-const geminiApiKey = defineSecret('GEMINI_API_KEY')
-const REGION = 'asia-south1'
-const REPORT_LIMIT_10_MIN = 4
-const REPORT_LIMIT_DAY = 20
-const CONFIG_LIMITS = { riskRadiusMetres:[150,500], provisionalHours:[0.5,6], confirmedHours:[6,48], alertRadiusKm:[0.25,5] } as const
+initializeApp();
+const db = getFirestore();
+const geminiApiKey = defineSecret("GEMINI_API_KEY");
+const REGION = "asia-south1";
+const REPORT_LIMIT_10_MIN = 4;
+const REPORT_LIMIT_DAY = 20;
+const CONFIG_LIMITS = {
+  riskRadiusMetres: [150, 500],
+  provisionalHours: [0.5, 6],
+  confirmedHours: [6, 48],
+  alertRadiusKm: [0.25, 5],
+} as const;
 
-type Severity = 'low'|'medium'|'high'
-type ReviewDecision = 'confirmed'|'rejected'|'duplicate'
+type Severity = "low" | "medium" | "high";
+type ReviewDecision = "confirmed" | "rejected" | "duplicate";
 
-function requireAuth(request:{auth?:{uid:string; token:Record<string,unknown>}}) {
-  if (!request.auth) throw new HttpsError('unauthenticated','Sign in to continue.')
-  return request.auth
+function requireAuth(request: {
+  auth?: { uid: string; token: Record<string, unknown> };
+}) {
+  if (!request.auth)
+    throw new HttpsError("unauthenticated", "Sign in to continue.");
+  return request.auth;
 }
-function cleanText(value:unknown,max:number) { return String(value||'').replace(/[<>]/g,'').trim().slice(0,max) }
-function validPoint(lat:number,lng:number) { return Number.isFinite(lat)&&Number.isFinite(lng)&&lat>=-90&&lat<=90&&lng>=-180&&lng<=180 }
-function sha(value:string) { return createHash('sha256').update(value).digest('hex') }
-function distanceMetres(a:{lat:number;lng:number},b:{lat:number;lng:number}) { const r=Math.PI/180,dLat=(b.lat-a.lat)*r,dLng=(b.lng-a.lng)*r,h=Math.sin(dLat/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dLng/2)**2; return 6_371_000*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h)) }
-function appleLocation(value:unknown) { if(typeof value!=='string')return null;const m=value.match(/^([+-]\d+(?:\.\d+)?)([+-]\d+(?:\.\d+)?)/);return m?{latitude:Number(m[1]),longitude:Number(m[2])}:null }
-function fuzzyPoint(id:string,lat:number,lng:number) { const h=createHash('sha256').update(id).digest();const metres=25+(h[0]/255)*25,angle=(h[1]/255)*Math.PI*2;return {lat:lat+Math.cos(angle)*metres/111_000,lng:lng+Math.sin(angle)*metres/(111_000*Math.max(.25,Math.cos(lat*Math.PI/180)))} }
-function publicReport(reportId:string,data:FirebaseFirestore.DocumentData,status:'provisional'|'confirmed',hours:number) { const point=fuzzyPoint(reportId,data.lat,data.lng);return { reportId,lat:point.lat,lng:point.lng,description:data.aiSummary||'Verified community dog activity',severity:data.observedSeverity||data.severity,dogCount:Math.max(1,data.dogCount||1),observedBehavior:data.observedBehavior||'unknown',verificationStatus:status,provisional:status==='provisional',aiSummary:data.aiSummary||'',aiConfidence:data.aiConfidence||0,locationEvidence:'privacy-protected',organizationId:data.organizationId||null,jurisdictionId:data.jurisdictionId||null,createdAt:data.createdAt||FieldValue.serverTimestamp(),expiresAt:Timestamp.fromMillis(Date.now()+hours*3_600_000) } }
-
-async function audit(actorId:string,action:string,targetType:string,targetId:string,organizationId?:string,metadata:Record<string,unknown>={}) { await db.collection('auditLogs').add({actorId,action,targetType,targetId,organizationId:organizationId||null,metadata,createdAt:FieldValue.serverTimestamp()}) }
-async function membership(uid:string,organizationId:string) { const snap=await db.doc(`organizations/${organizationId}/members/${uid}`).get();const data=snap.data();if(!snap.exists||data?.status!=='active')throw new HttpsError('permission-denied','Active organization membership required.');return data! }
-async function authority(request:{auth?:{uid:string;token:Record<string,unknown>}},organizationId:string,roles:string[]) { const auth=requireAuth(request);if(auth.token.platformAdmin===true)return {auth,member:{role:'platform_admin',jurisdictionIds:[]}};const member=await membership(auth.uid,organizationId);if(!roles.includes(member.role))throw new HttpsError('permission-denied','Your role cannot perform this action.');return {auth,member} }
-
-export const bootstrapUser = onCall({region:REGION,enforceAppCheck:false},async request=>{
-  const a=requireAuth(request),ref=db.doc(`users/${a.uid}`),privateRef=db.doc(`userPrivate/${a.uid}`),settingsRef=db.doc(`userSettings/${a.uid}`)
-  await db.runTransaction(async tx=>{if((await tx.get(ref)).exists){tx.set(ref,{phoneVerified:Boolean(a.token.phone_number),updatedAt:FieldValue.serverTimestamp()},{merge:true});tx.set(privateRef,{phoneNumber:a.token.phone_number||null,email:a.token.email||null,emailVerified:Boolean(a.token.email_verified)},{merge:true});return}const name=cleanText(a.token.name||'Citizen',80)||'Citizen',handle=`${name.toLowerCase().replace(/[^a-z0-9]+/g,'').slice(0,16)||'citizen'}-${a.uid.slice(0,5)}`;tx.set(ref,{uid:a.uid,handle,displayName:name,photoURL:cleanText(a.token.picture,500)||null,language:'en',trustTier:'new',impactPoints:0,confirmedReports:0,currentStreak:0,phoneVerified:Boolean(a.token.phone_number),communityVisible:false,leaderboardVisible:false,onboardingComplete:false,contributionStatus:'active',createdAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()});tx.set(privateRef,{email:a.token.email||null,phoneNumber:a.token.phone_number||null,emailVerified:Boolean(a.token.email_verified),createdAt:FieldValue.serverTimestamp()});tx.set(settingsRef,{language:'en',communityVisible:false,leaderboardVisible:false,pushEnabled:false,homeArea:null})})
-  return {ok:true}
-})
-
-export const completeOnboarding = onCall({region:REGION,enforceAppCheck:false},async request=>{
-  const a=requireAuth(request),adult=Boolean(request.data?.adult),accepted=Boolean(request.data?.acceptedTerms);if(!adult||!accepted)throw new HttpsError('failed-precondition','Adult confirmation and terms acceptance are required to contribute.')
-  const displayName=cleanText(request.data?.displayName||a.token.name||'Citizen',80),language=cleanText(request.data?.language||'en',12),communityVisible=Boolean(request.data?.communityVisible),leaderboardVisible=Boolean(request.data?.leaderboardVisible)
-  await db.doc(`users/${a.uid}`).set({displayName,language,communityVisible,leaderboardVisible,onboardingComplete:true,updatedAt:FieldValue.serverTimestamp()},{merge:true});await db.doc(`userSettings/${a.uid}`).set({language,communityVisible,leaderboardVisible},{merge:true});await db.collection(`users/${a.uid}/consents`).add({termsVersion:'2026-08-24',privacyVersion:'2026-08-24',adultAffirmed:true,communityVisible,leaderboardVisible,createdAt:FieldValue.serverTimestamp()});return {ok:true}
-})
-
-export const createReportSession = onCall({region:REGION,enforceAppCheck:false},async request=>{
-  const a=requireAuth(request),lat=Number(request.data?.lat),lng=Number(request.data?.lng),description=cleanText(request.data?.description,500),severity=request.data?.severity as Severity,photoSource=request.data?.photoSource==='camera'?'camera':'library',idempotencyKey=cleanText(request.data?.idempotencyKey,80)
-  if(!validPoint(lat,lng)||description.length<10||!['low','medium','high'].includes(severity)||!idempotencyKey)throw new HttpsError('invalid-argument','Invalid report details.')
-  const pilot=(await db.doc('publicConfig/platform').get()).data(),organizationId=pilot?.pilotOrganizationId||null,jurisdictionId=pilot?.pilotJurisdictionId||null
-  const userRef=db.doc(`users/${a.uid}`),userPrivate=db.doc(`userPrivate/${a.uid}`),reportId=sha(`${a.uid}:${idempotencyKey}`).slice(0,32),reportRef=db.doc(`reports/${reportId}`),now=Date.now()
-  await db.runTransaction(async tx=>{const [profileSnap,privateSnap,existing]=await Promise.all([tx.get(userRef),tx.get(userPrivate),tx.get(reportRef)]);if(existing.exists)return;const profile=profileSnap.data();if(!profile?.onboardingComplete||profile?.contributionStatus!=='active')throw new HttpsError('failed-precondition','Complete your profile or resolve the account restriction first.');const rate=privateSnap.data()?.reportRate||{windowStart:now,windowCount:0,dayStart:now,dayCount:0};const windowCount=now-rate.windowStart<600_000?rate.windowCount:0,dayCount=now-rate.dayStart<86_400_000?rate.dayCount:0;if(windowCount>=REPORT_LIMIT_10_MIN||dayCount>=REPORT_LIMIT_DAY)throw new HttpsError('resource-exhausted','Report limit reached. Try again later.');tx.set(reportRef,{reporterId:a.uid,organizationId,jurisdictionId,lat,lng,description,severity,photoSource,verificationStatus:'uploading',processingStatus:'awaiting-image',rewardStatus:photoSource==='camera'&&profile.phoneVerified?'pending':'ineligible',createdAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()});tx.set(userPrivate,{reportRate:{windowStart:windowCount?rate.windowStart:now,windowCount:windowCount+1,dayStart:dayCount?rate.dayStart:now,dayCount:dayCount+1}},{merge:true})})
-  return {reportId,storagePath:`reportEvidence/${a.uid}/${reportId}/original`}
-})
-
-export const finalizeReportUpload = onCall({region:REGION,enforceAppCheck:false},async request=>{
-  const a=requireAuth(request),reportId=cleanText(request.data?.reportId,64),storagePath=cleanText(request.data?.storagePath,300),expected=`reportEvidence/${a.uid}/${reportId}/`;if(!reportId||!storagePath.startsWith(expected))throw new HttpsError('invalid-argument','Invalid upload path.');const ref=db.doc(`reports/${reportId}`),snap=await ref.get();if(!snap.exists||snap.data()?.reporterId!==a.uid||snap.data()?.verificationStatus!=='uploading')throw new HttpsError('permission-denied','Invalid report session.');const [meta]=await getStorage().bucket().file(storagePath).getMetadata();if(Number(meta.size)>12*1024*1024||!String(meta.contentType||'').startsWith('image/'))throw new HttpsError('invalid-argument','Invalid image upload.');await ref.update({storagePath,verificationStatus:'automated_review',processingStatus:'queued',updatedAt:FieldValue.serverTimestamp()});return {ok:true}
-})
-
-export const uploadReportEvidence = onCall({region:REGION,enforceAppCheck:false,timeoutSeconds:90,memory:'512MiB'},async request=>{
-  const a=requireAuth(request),reportId=cleanText(request.data?.reportId,64),encoded=String(request.data?.imageBase64||''),declaredMime=cleanText(request.data?.contentType,80)
-  if(!reportId||!encoded)throw new HttpsError('invalid-argument','Report and image are required.')
-  const reportRef=db.doc(`reports/${reportId}`),snap=await reportRef.get(),data=snap.data()
-  if(!snap.exists||data?.reporterId!==a.uid||data?.verificationStatus!=='uploading')throw new HttpsError('permission-denied','Invalid or expired report session.')
-  let bytes:Buffer;try{bytes=Buffer.from(encoded,'base64')}catch{throw new HttpsError('invalid-argument','The image could not be decoded.')}
-  if(bytes.length<1000||bytes.length>10*1024*1024)throw new HttpsError('invalid-argument','The image must be between 1 KB and 10 MB.')
-  const jpeg=bytes[0]===0xff&&bytes[1]===0xd8,png=bytes.subarray(1,4).toString()==='PNG',webp=bytes.subarray(8,12).toString()==='WEBP',heif=bytes.subarray(4,12).toString().includes('ftyp')
-  if(!jpeg&&!png&&!webp&&!heif)throw new HttpsError('invalid-argument','Unsupported or invalid image file.')
-  const contentType=jpeg?'image/jpeg':png?'image/png':webp?'image/webp':declaredMime.includes('heic')?'image/heic':'image/heif',storagePath=`reportEvidence/${a.uid}/${reportId}/original-${Date.now()}`
-  await getStorage().bucket().file(storagePath).save(bytes,{resumable:false,contentType,metadata:{metadata:{reportId,ownerUid:a.uid}}})
-  await reportRef.update({storagePath,verificationStatus:'automated_review',processingStatus:'queued',uploadCompletedAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()})
-  return {ok:true}
-})
-
-async function verifyReport(reportId:string) {
-  const ref=db.doc(`reports/${reportId}`),snap=await ref.get();if(!snap.exists||snap.data()?.verificationStatus!=='automated_review')return;const data=snap.data()!,file=getStorage().bucket().file(data.storagePath),[bytes]=await file.download();if(bytes.length>12*1024*1024)throw new Error('PHOTO_TOO_LARGE');const imageHash=createHash('sha256').update(bytes).digest('hex'),duplicate=await db.collection('reports').where('imageHash','==',imageHash).limit(1).get();if(!duplicate.empty&&duplicate.docs[0].id!==reportId){await ref.update({imageHash,verificationStatus:'duplicate',processingStatus:'complete',aiReason:'This exact image was already submitted.',rewardStatus:'ineligible',verifiedAt:FieldValue.serverTimestamp()});return}
-  let metadata:{latitude?:number;longitude?:number;DateTimeOriginal?:Date;CreateDate?:Date}={};try{const[gps,dates,full]=await Promise.all([exifr.gps(bytes),exifr.parse(bytes,['DateTimeOriginal','CreateDate']),exifr.parse(bytes,{gps:true,exif:true,xmp:true,reviveValues:true})]);metadata={...(dates||{}),...(full||{}),...(appleLocation(full?.GPSCoordinates||full?.location||full?.Location||full?.['com.apple.quicktime.location.ISO6709'])||{}),...(gps||{})}}catch(error){logger.warn('exif-parse-failed',{reportId,error:String(error)})}
-  const hasGps=Number.isFinite(metadata.latitude)&&Number.isFinite(metadata.longitude),photoDistance=hasGps?distanceMetres({lat:data.lat,lng:data.lng},{lat:metadata.latitude!,lng:metadata.longitude!}):null,capturedAt=metadata.DateTimeOriginal||metadata.CreateDate,ageMs=capturedAt?Date.now()-new Date(capturedAt).getTime():null,submittedAgo=data.createdAt?.toMillis?Date.now()-data.createdAt.toMillis():null,liveCamera=data.photoSource==='camera'&&submittedAgo!==null&&submittedAgo>=0&&submittedAgo<=10*60_000,locationEvidence=!hasGps?(liveCamera?'live-camera':'unverified'):photoDistance!<=200?'verified':'mismatch',timeEvidence=ageMs===null?(liveCamera?'recent':'unverified'):ageMs>=-600_000&&ageMs<=86_400_000?'recent':'stale'
-  let analysis=bytes,mime='image/jpeg';try{analysis=await sharp(bytes).rotate().resize({width:1600,height:1600,fit:'inside',withoutEnlargement:true}).jpeg({quality:82}).toBuffer()}catch{mime='application/octet-stream'}
-  const model=new GoogleGenerativeAI(geminiApiKey.value()).getGenerativeModel({model:'gemini-3.6-flash',generationConfig:{responseMimeType:'application/json',responseSchema:{type:SchemaType.OBJECT,properties:{containsDog:{type:SchemaType.BOOLEAN},plausible:{type:SchemaType.BOOLEAN},manipulationLikely:{type:SchemaType.BOOLEAN},confidence:{type:SchemaType.NUMBER},dogCount:{type:SchemaType.INTEGER},observedSeverity:{type:SchemaType.STRING,format:'enum',enum:['low','medium','high']},observedBehavior:{type:SchemaType.STRING,format:'enum',enum:['calm','roaming','barking','chasing','aggressive','injured','unknown']},sceneSummary:{type:SchemaType.STRING},reason:{type:SchemaType.STRING}},required:['containsDog','plausible','manipulationLikely','confidence','dogCount','observedSeverity','observedBehavior','sceneSummary','reason']}}})
-  let verdict:{containsDog:boolean;plausible:boolean;manipulationLikely:boolean;confidence:number;dogCount:number;observedSeverity:Severity;observedBehavior:string;sceneSummary:string;reason:string};try{const result=await model.generateContent([`Conservatively verify a current community dog-safety report: "${data.description}". Count only visible real dogs. Detect screenshots, memes, synthetic or edited images. Do not infer aggression from breed. Return a factual scene summary without people-identifying details.`,{inlineData:{data:analysis.toString('base64'),mimeType:mime}}]);verdict=JSON.parse(result.response.text())}catch(error){logger.error('gemini-failed',{reportId,error:String(error)});await ref.update({verificationStatus:'review_required',processingStatus:'ai_failed',aiReason:'Automated verification unavailable; queued for human review.',updatedAt:FieldValue.serverTimestamp()});await createReviewCase(reportId,data,['ai_service_failure']);return}
-  const evidenceValid=(locationEvidence==='verified'||locationEvidence==='live-camera')&&timeEvidence==='recent',visualConfidence=verdict.containsDog&&verdict.plausible&&verdict.confidence>=.8,dangerous=verdict.observedSeverity==='high'||['aggressive','chasing','injured'].includes(verdict.observedBehavior),autoPublish=visualConfidence&&!dangerous,status=!verdict.containsDog&&verdict.confidence>=.8?'rejected':autoPublish?'provisional':'review_required',evidenceQuality=evidenceValid&&!verdict.manipulationLikely?'strong':'limited',reason=locationEvidence==='mismatch'?`Photo location differs by ${Math.round(photoDistance!)} m.`:locationEvidence==='unverified'?'Location evidence could not be verified.':timeEvidence==='stale'?'Photo appears older than 24 hours.':verdict.reason,updates={imageHash,verificationStatus:status,processingStatus:'complete',decisionSource:autoPublish?'ai_only':status==='rejected'?'ai_rejection':'human_required',humanReviewRequired:status==='review_required',evidenceQuality,aiReason:cleanText(reason,180),aiSummary:cleanText(verdict.sceneSummary,300),aiConfidence:Math.max(0,Math.min(1,verdict.confidence)),dogCount:Math.max(0,Math.min(30,verdict.dogCount)),observedSeverity:verdict.observedSeverity,observedBehavior:verdict.observedBehavior,locationEvidence,timeEvidence,photoDistanceMetres:photoDistance,photoCapturedAt:capturedAt||null,manipulationLikely:verdict.manipulationLikely,verifiedAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()}
-  await ref.update(updates);if(autoPublish){await db.doc(`publicSightings/${reportId}`).set({...publicReport(reportId,{...data,...updates},'provisional',evidenceQuality==='strong'?6:2),evidenceQuality},);await db.doc(`reviewCases/${reportId}`).delete();return}if(status==='review_required')await createReviewCase(reportId,{...data,...updates},dangerous?['dangerous_behavior']:['low_ai_confidence'])
+function cleanText(value: unknown, max: number) {
+  return String(value || "")
+    .replace(/[<>]/g, "")
+    .trim()
+    .slice(0, max);
+}
+function validPoint(lat: number, lng: number) {
+  return (
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180
+  );
+}
+function sha(value: string) {
+  return createHash("sha256").update(value).digest("hex");
+}
+function distanceMetres(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+) {
+  const r = Math.PI / 180,
+    dLat = (b.lat - a.lat) * r,
+    dLng = (b.lng - a.lng) * r,
+    h =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLng / 2) ** 2;
+  return 6_371_000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+function appleLocation(value: unknown) {
+  if (typeof value !== "string") return null;
+  const m = value.match(/^([+-]\d+(?:\.\d+)?)([+-]\d+(?:\.\d+)?)/);
+  return m ? { latitude: Number(m[1]), longitude: Number(m[2]) } : null;
+}
+function fuzzyPoint(id: string, lat: number, lng: number) {
+  const h = createHash("sha256").update(id).digest();
+  const metres = 25 + (h[0] / 255) * 25,
+    angle = (h[1] / 255) * Math.PI * 2;
+  return {
+    lat: lat + (Math.cos(angle) * metres) / 111_000,
+    lng:
+      lng +
+      (Math.sin(angle) * metres) /
+        (111_000 * Math.max(0.25, Math.cos((lat * Math.PI) / 180))),
+  };
+}
+function publicReport(
+  reportId: string,
+  data: FirebaseFirestore.DocumentData,
+  status: "provisional" | "confirmed",
+  hours: number,
+) {
+  const point = fuzzyPoint(reportId, data.lat, data.lng);
+  return {
+    reportId,
+    lat: point.lat,
+    lng: point.lng,
+    description: data.aiSummary || "Verified community dog activity",
+    severity: data.observedSeverity || data.severity,
+    dogCount: Math.max(1, data.dogCount || 1),
+    observedBehavior: data.observedBehavior || "unknown",
+    verificationStatus: status,
+    provisional: status === "provisional",
+    aiSummary: data.aiSummary || "",
+    aiConfidence: data.aiConfidence || 0,
+    locationEvidence: "privacy-protected",
+    organizationId: data.organizationId || null,
+    jurisdictionId: data.jurisdictionId || null,
+    createdAt: data.createdAt || FieldValue.serverTimestamp(),
+    expiresAt: Timestamp.fromMillis(Date.now() + hours * 3_600_000),
+  };
 }
 
-async function createReviewCase(reportId:string,data:FirebaseFirestore.DocumentData,reasons:string[]) { await db.doc(`reviewCases/${reportId}`).set({reportId,reporterId:data.reporterId,organizationId:data.organizationId||null,jurisdictionId:data.jurisdictionId||null,priority:data.observedSeverity==='high'||data.severity==='high'?'high':'normal',status:'open',reasonCodes:reasons,createdAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()},{merge:true}) }
-export const processPendingReport = onDocumentUpdated({document:'reports/{reportId}',region:REGION,secrets:[geminiApiKey],timeoutSeconds:180,memory:'512MiB',maxInstances:20},async event=>{const before=event.data?.before.data(),after=event.data?.after.data();if(!after||after.verificationStatus!=='automated_review'||!after.storagePath||before?.storagePath===after.storagePath&&before?.verificationStatus==='automated_review')return;try{await verifyReport(event.params.reportId)}catch(error){logger.error('report-processing-failed',{reportId:event.params.reportId,error:String(error)});await event.data!.after.ref.update({verificationStatus:'review_required',processingStatus:'failed',aiReason:'Verification failed safely; queued for review.',updatedAt:FieldValue.serverTimestamp()});await createReviewCase(event.params.reportId,after,['pipeline_failure'])}})
+async function audit(
+  actorId: string,
+  action: string,
+  targetType: string,
+  targetId: string,
+  organizationId?: string,
+  metadata: Record<string, unknown> = {},
+) {
+  await db
+    .collection("auditLogs")
+    .add({
+      actorId,
+      action,
+      targetType,
+      targetId,
+      organizationId: organizationId || null,
+      metadata,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+}
+async function membership(uid: string, organizationId: string) {
+  const snap = await db
+    .doc(`organizations/${organizationId}/members/${uid}`)
+    .get();
+  const data = snap.data();
+  if (!snap.exists || data?.status !== "active")
+    throw new HttpsError(
+      "permission-denied",
+      "Active organization membership required.",
+    );
+  return data!;
+}
+async function authority(
+  request: { auth?: { uid: string; token: Record<string, unknown> } },
+  organizationId: string,
+  roles: string[],
+) {
+  const auth = requireAuth(request);
+  if (auth.token.platformAdmin === true)
+    return { auth, member: { role: "platform_admin", jurisdictionIds: [] } };
+  const member = await membership(auth.uid, organizationId);
+  if (!roles.includes(member.role))
+    throw new HttpsError(
+      "permission-denied",
+      "Your role cannot perform this action.",
+    );
+  return { auth, member };
+}
 
-export const recoverStalledReports = onSchedule({region:REGION,schedule:'every 10 minutes',timeZone:'Asia/Kolkata',secrets:[geminiApiKey],timeoutSeconds:300,memory:'512MiB'},async()=>{
-  const cutoff=Timestamp.fromMillis(Date.now()-5*60_000),queued=await db.collection('reports').where('verificationStatus','==','automated_review').where('updatedAt','<=',cutoff).limit(20).get()
-  for(const report of queued.docs){try{await verifyReport(report.id)}catch(error){logger.error('stalled-report-recovery-failed',{reportId:report.id,error:String(error)});await report.ref.update({verificationStatus:'review_required',processingStatus:'failed',aiReason:'Automated verification timed out; queued for human review.',updatedAt:FieldValue.serverTimestamp()});await createReviewCase(report.id,report.data(),['verification_timeout'])}}
-  const abandoned=await db.collection('reports').where('verificationStatus','==','uploading').where('updatedAt','<=',Timestamp.fromMillis(Date.now()-30*60_000)).limit(50).get()
-  for(const report of abandoned.docs)await report.ref.update({verificationStatus:'expired',processingStatus:'upload_failed',aiReason:'Photo upload did not finish. Please submit the report again.',updatedAt:FieldValue.serverTimestamp()})
-})
+export const bootstrapUser = onCall(
+  { region: REGION, enforceAppCheck: false },
+  async (request) => {
+    const a = requireAuth(request),
+      ref = db.doc(`users/${a.uid}`),
+      privateRef = db.doc(`userPrivate/${a.uid}`),
+      settingsRef = db.doc(`userSettings/${a.uid}`);
+    await db.runTransaction(async (tx) => {
+      if ((await tx.get(ref)).exists) {
+        tx.set(
+          ref,
+          {
+            phoneVerified: Boolean(a.token.phone_number),
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+        tx.set(
+          privateRef,
+          {
+            phoneNumber: a.token.phone_number || null,
+            email: a.token.email || null,
+            emailVerified: Boolean(a.token.email_verified),
+          },
+          { merge: true },
+        );
+        return;
+      }
+      const name = cleanText(a.token.name || "Citizen", 80) || "Citizen",
+        handle = `${
+          name
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "")
+            .slice(0, 16) || "citizen"
+        }-${a.uid.slice(0, 5)}`;
+      tx.set(ref, {
+        uid: a.uid,
+        handle,
+        displayName: name,
+        photoURL: cleanText(a.token.picture, 500) || null,
+        language: "en",
+        trustTier: "new",
+        impactPoints: 0,
+        confirmedReports: 0,
+        currentStreak: 0,
+        phoneVerified: Boolean(a.token.phone_number),
+        communityVisible: false,
+        leaderboardVisible: false,
+        onboardingComplete: false,
+        contributionStatus: "active",
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      tx.set(privateRef, {
+        email: a.token.email || null,
+        phoneNumber: a.token.phone_number || null,
+        emailVerified: Boolean(a.token.email_verified),
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      tx.set(settingsRef, {
+        language: "en",
+        communityVisible: false,
+        leaderboardVisible: false,
+        pushEnabled: false,
+        homeArea: null,
+      });
+    });
+    return { ok: true };
+  },
+);
 
-async function awardConfirmedReport(reportId:string,data:FirebaseFirestore.DocumentData) { if(data.rewardStatus!=='pending'||data.photoSource!=='camera')return;const userRef=db.doc(`users/${data.reporterId}`),eventRef=db.doc(`users/${data.reporterId}/rewardEvents/report-${reportId}`);await db.runTransaction(async tx=>{if((await tx.get(eventRef)).exists)return;const user=(await tx.get(userRef)).data();if(!user?.phoneVerified)return;const today=new Date().toISOString().slice(0,10),last=user.lastStreakDate as string|undefined,yesterday=new Date(Date.now()-86_400_000).toISOString().slice(0,10),streak=last===today?user.currentStreak||0:last===yesterday?(user.currentStreak||0)+1:1;tx.set(eventRef,{type:'confirmed_report',reportId,points:10,status:'credited',createdAt:FieldValue.serverTimestamp()});tx.update(userRef,{impactPoints:FieldValue.increment(10),confirmedReports:FieldValue.increment(1),currentStreak:streak,lastStreakDate:today,trustTier:(user.confirmedReports||0)>=19?'guardian':(user.confirmedReports||0)>=4?'trusted':'contributor',updatedAt:FieldValue.serverTimestamp()});tx.update(db.doc(`reports/${reportId}`),{rewardStatus:'credited',pointsAwarded:10})}) }
+export const completeOnboarding = onCall(
+  { region: REGION, enforceAppCheck: false },
+  async (request) => {
+    const a = requireAuth(request),
+      adult = Boolean(request.data?.adult),
+      accepted = Boolean(request.data?.acceptedTerms);
+    if (!adult || !accepted)
+      throw new HttpsError(
+        "failed-precondition",
+        "Adult confirmation and terms acceptance are required to contribute.",
+      );
+    const displayName = cleanText(
+        request.data?.displayName || a.token.name || "Citizen",
+        80,
+      ),
+      language = cleanText(request.data?.language || "en", 12),
+      communityVisible = Boolean(request.data?.communityVisible),
+      leaderboardVisible = Boolean(request.data?.leaderboardVisible);
+    await db
+      .doc(`users/${a.uid}`)
+      .set(
+        {
+          displayName,
+          language,
+          communityVisible,
+          leaderboardVisible,
+          onboardingComplete: true,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+    await db
+      .doc(`userSettings/${a.uid}`)
+      .set({ language, communityVisible, leaderboardVisible }, { merge: true });
+    await db
+      .collection(`users/${a.uid}/consents`)
+      .add({
+        termsVersion: "2026-08-24",
+        privacyVersion: "2026-08-24",
+        adultAffirmed: true,
+        communityVisible,
+        leaderboardVisible,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    return { ok: true };
+  },
+);
 
-export const reviewReport = onCall({region:REGION,enforceAppCheck:false},async request=>{const organizationId=cleanText(request.data?.organizationId,80),reportId=cleanText(request.data?.reportId,80),decision=request.data?.decision as ReviewDecision,reason=cleanText(request.data?.reason,300);if(!reportId||!['confirmed','rejected','duplicate'].includes(decision)||reason.length<5)throw new HttpsError('invalid-argument','Report, decision, and reason are required.');const {auth}=await authority(request,organizationId,['moderator','org_admin']);const ref=db.doc(`reports/${reportId}`),snap=await ref.get(),data=snap.data();if(!snap.exists||!data||data.organizationId&&data.organizationId!==organizationId)throw new HttpsError('not-found','Report not found in this jurisdiction.');await ref.update({verificationStatus:decision,moderatorReason:reason,reviewerId:auth.uid,reviewedAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()});if(decision==='confirmed'){await db.doc(`publicSightings/${reportId}`).set(publicReport(reportId,data,'confirmed',24));await awardConfirmedReport(reportId,data)}else await db.doc(`publicSightings/${reportId}`).delete();await db.doc(`reviewCases/${reportId}`).set({status:'resolved',decision,reviewerId:auth.uid,resolvedAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()},{merge:true});await audit(auth.uid,'review_report','report',reportId,organizationId,{decision,reason});return {ok:true} })
+export const createReportSession = onCall(
+  { region: REGION, enforceAppCheck: false },
+  async (request) => {
+    const a = requireAuth(request),
+      lat = Number(request.data?.lat),
+      lng = Number(request.data?.lng),
+      description = cleanText(request.data?.description, 500),
+      severity = request.data?.severity as Severity,
+      photoSource =
+        request.data?.photoSource === "camera" ? "camera" : "library",
+      idempotencyKey = cleanText(request.data?.idempotencyKey, 80);
+    if (
+      !validPoint(lat, lng) ||
+      description.length < 10 ||
+      !["low", "medium", "high"].includes(severity) ||
+      !idempotencyKey
+    )
+      throw new HttpsError("invalid-argument", "Invalid report details.");
+    const pilot = (await db.doc("publicConfig/platform").get()).data(),
+      organizationId = pilot?.pilotOrganizationId || null,
+      jurisdictionId = pilot?.pilotJurisdictionId || null;
+    const userRef = db.doc(`users/${a.uid}`),
+      userPrivate = db.doc(`userPrivate/${a.uid}`),
+      reportId = sha(`${a.uid}:${idempotencyKey}`).slice(0, 32),
+      reportRef = db.doc(`reports/${reportId}`),
+      now = Date.now();
+    await db.runTransaction(async (tx) => {
+      const [profileSnap, privateSnap, existing] = await Promise.all([
+        tx.get(userRef),
+        tx.get(userPrivate),
+        tx.get(reportRef),
+      ]);
+      if (existing.exists) return;
+      const profile = profileSnap.data();
+      if (
+        !profile?.onboardingComplete ||
+        profile?.contributionStatus !== "active"
+      )
+        throw new HttpsError(
+          "failed-precondition",
+          "Complete your profile or resolve the account restriction first.",
+        );
+      const rate = privateSnap.data()?.reportRate || {
+        windowStart: now,
+        windowCount: 0,
+        dayStart: now,
+        dayCount: 0,
+      };
+      const windowCount =
+          now - rate.windowStart < 600_000 ? rate.windowCount : 0,
+        dayCount = now - rate.dayStart < 86_400_000 ? rate.dayCount : 0;
+      if (windowCount >= REPORT_LIMIT_10_MIN || dayCount >= REPORT_LIMIT_DAY)
+        throw new HttpsError(
+          "resource-exhausted",
+          "Report limit reached. Try again later.",
+        );
+      tx.set(reportRef, {
+        reporterId: a.uid,
+        organizationId,
+        jurisdictionId,
+        lat,
+        lng,
+        description,
+        severity,
+        photoSource,
+        verificationStatus: "uploading",
+        processingStatus: "awaiting-image",
+        rewardStatus:
+          photoSource === "camera" && profile.phoneVerified
+            ? "pending"
+            : "ineligible",
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      tx.set(
+        userPrivate,
+        {
+          reportRate: {
+            windowStart: windowCount ? rate.windowStart : now,
+            windowCount: windowCount + 1,
+            dayStart: dayCount ? rate.dayStart : now,
+            dayCount: dayCount + 1,
+          },
+        },
+        { merge: true },
+      );
+    });
+    return {
+      reportId,
+      storagePath: `reportEvidence/${a.uid}/${reportId}/original`,
+    };
+  },
+);
 
-export const getReportEvidenceUrl = onCall({region:REGION,enforceAppCheck:false},async request=>{const organizationId=cleanText(request.data?.organizationId,80),reportId=cleanText(request.data?.reportId,80);await authority(request,organizationId,['moderator','org_admin']);const snap=await db.doc(`reports/${reportId}`).get(),data=snap.data();if(!snap.exists||!data?.storagePath||data.organizationId!==organizationId)throw new HttpsError('not-found','Evidence not found.');const [url]=await getStorage().bucket().file(data.storagePath).getSignedUrl({action:'read',expires:Date.now()+10*60_000});return {url,expiresInSeconds:600}})
+export const finalizeReportUpload = onCall(
+  { region: REGION, enforceAppCheck: false },
+  async (request) => {
+    const a = requireAuth(request),
+      reportId = cleanText(request.data?.reportId, 64),
+      storagePath = cleanText(request.data?.storagePath, 300),
+      expected = `reportEvidence/${a.uid}/${reportId}/`;
+    if (!reportId || !storagePath.startsWith(expected))
+      throw new HttpsError("invalid-argument", "Invalid upload path.");
+    const ref = db.doc(`reports/${reportId}`),
+      snap = await ref.get();
+    if (
+      !snap.exists ||
+      snap.data()?.reporterId !== a.uid ||
+      snap.data()?.verificationStatus !== "uploading"
+    )
+      throw new HttpsError("permission-denied", "Invalid report session.");
+    const [meta] = await getStorage().bucket().file(storagePath).getMetadata();
+    if (
+      Number(meta.size) > 12 * 1024 * 1024 ||
+      !String(meta.contentType || "").startsWith("image/")
+    )
+      throw new HttpsError("invalid-argument", "Invalid image upload.");
+    await ref.update({
+      storagePath,
+      verificationStatus: "automated_review",
+      processingStatus: "queued",
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return { ok: true };
+  },
+);
 
-export const updateUserSettings = onCall({region:REGION,enforceAppCheck:false},async request=>{const a=requireAuth(request),allowed={language:cleanText(request.data?.language||'en',12),communityVisible:Boolean(request.data?.communityVisible),leaderboardVisible:Boolean(request.data?.leaderboardVisible),pushEnabled:Boolean(request.data?.pushEnabled),homeArea:cleanText(request.data?.homeArea,120)||null};await db.doc(`userSettings/${a.uid}`).set(allowed,{merge:true});await db.doc(`users/${a.uid}`).set({language:allowed.language,communityVisible:allowed.communityVisible,leaderboardVisible:allowed.leaderboardVisible,updatedAt:FieldValue.serverTimestamp()},{merge:true});return {ok:true}})
-export const exportMyData = onCall({region:REGION,enforceAppCheck:false},async request=>{const a=requireAuth(request),[profile,privateData,settings,reports]=await Promise.all([db.doc(`users/${a.uid}`).get(),db.doc(`userPrivate/${a.uid}`).get(),db.doc(`userSettings/${a.uid}`).get(),db.collection('reports').where('reporterId','==',a.uid).limit(200).get()]);return {generatedAt:new Date().toISOString(),profile:profile.data()||null,private:privateData.data()||null,settings:settings.data()||null,reports:reports.docs.map(d=>({id:d.id,...d.data(),storagePath:undefined,imageHash:undefined}))}})
-export const requestAccountDeletion = onCall({region:REGION,enforceAppCheck:false},async request=>{const a=requireAuth(request),executeAfter=Timestamp.fromMillis(Date.now()+7*86_400_000);await db.doc(`deletionRequests/${a.uid}`).set({uid:a.uid,status:'cooling_off',executeAfter,requestedAt:FieldValue.serverTimestamp()});await db.doc(`users/${a.uid}`).set({contributionStatus:'suspended',deletionRequestedAt:FieldValue.serverTimestamp()},{merge:true});await audit(a.uid,'request_account_deletion','user',a.uid);return {executeAfter:executeAfter.toDate().toISOString()}})
-export const cancelAccountDeletion = onCall({region:REGION,enforceAppCheck:false},async request=>{const a=requireAuth(request),ref=db.doc(`deletionRequests/${a.uid}`),snap=await ref.get();if(!snap.exists||snap.data()?.status!=='cooling_off')throw new HttpsError('failed-precondition','No cancellable deletion request.');await ref.update({status:'cancelled',cancelledAt:FieldValue.serverTimestamp()});await db.doc(`users/${a.uid}`).set({contributionStatus:'active',deletionRequestedAt:FieldValue.delete()},{merge:true});return {ok:true}})
-export const executeAccountDeletions = onSchedule({region:REGION,schedule:'every day 02:30',timeZone:'Asia/Kolkata'},async()=>{const due=await db.collection('deletionRequests').where('status','==','cooling_off').where('executeAfter','<=',Timestamp.now()).limit(50).get();for(const request of due.docs){const uid=request.id,reports=await db.collection('reports').where('reporterId','==',uid).limit(400).get(),batch=db.batch();for(const report of reports.docs)batch.update(report.ref,{reporterId:null,reporterDeleted:true,updatedAt:FieldValue.serverTimestamp()});batch.update(request.ref,{status:'executing',startedAt:FieldValue.serverTimestamp()});await batch.commit();await db.recursiveDelete(db.doc(`users/${uid}`));await Promise.all([db.doc(`userPrivate/${uid}`).delete(),db.doc(`userSettings/${uid}`).delete()]);try{await getAuth().deleteUser(uid)}catch(error){logger.warn('delete-auth-user-failed',{uid,error:String(error)})}await request.ref.set({uid,status:'complete',completedAt:FieldValue.serverTimestamp()})}})
+export const uploadReportEvidence = onCall(
+  {
+    region: REGION,
+    enforceAppCheck: false,
+    timeoutSeconds: 90,
+    memory: "512MiB",
+  },
+  async (request) => {
+    const a = requireAuth(request),
+      reportId = cleanText(request.data?.reportId, 64),
+      encoded = String(request.data?.imageBase64 || ""),
+      declaredMime = cleanText(request.data?.contentType, 80);
+    if (!reportId || !encoded)
+      throw new HttpsError(
+        "invalid-argument",
+        "Report and image are required.",
+      );
+    const reportRef = db.doc(`reports/${reportId}`),
+      snap = await reportRef.get(),
+      data = snap.data();
+    if (
+      !snap.exists ||
+      data?.reporterId !== a.uid ||
+      data?.verificationStatus !== "uploading"
+    )
+      throw new HttpsError(
+        "permission-denied",
+        "Invalid or expired report session.",
+      );
+    let bytes: Buffer;
+    try {
+      bytes = Buffer.from(encoded, "base64");
+    } catch {
+      throw new HttpsError(
+        "invalid-argument",
+        "The image could not be decoded.",
+      );
+    }
+    if (bytes.length < 1000 || bytes.length > 10 * 1024 * 1024)
+      throw new HttpsError(
+        "invalid-argument",
+        "The image must be between 1 KB and 10 MB.",
+      );
+    const jpeg = bytes[0] === 0xff && bytes[1] === 0xd8,
+      png = bytes.subarray(1, 4).toString() === "PNG",
+      webp = bytes.subarray(8, 12).toString() === "WEBP",
+      heif = bytes.subarray(4, 12).toString().includes("ftyp");
+    if (!jpeg && !png && !webp && !heif)
+      throw new HttpsError(
+        "invalid-argument",
+        "Unsupported or invalid image file.",
+      );
+    const contentType = jpeg
+        ? "image/jpeg"
+        : png
+          ? "image/png"
+          : webp
+            ? "image/webp"
+            : declaredMime.includes("heic")
+              ? "image/heic"
+              : "image/heif",
+      storagePath = `reportEvidence/${a.uid}/${reportId}/original-${Date.now()}`;
+    await getStorage()
+      .bucket()
+      .file(storagePath)
+      .save(bytes, {
+        resumable: false,
+        contentType,
+        metadata: { metadata: { reportId, ownerUid: a.uid } },
+      });
+    await reportRef.update({
+      storagePath,
+      verificationStatus: "uploaded",
+      processingStatus: "image_uploaded",
+      uploadedBytes: bytes.length,
+      uploadContentType: contentType,
+      uploadCompletedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return { ok: true, uploadedBytes: bytes.length, contentType };
+  },
+);
 
-export const followUser = onCall({region:REGION,enforceAppCheck:false},async request=>{const a=requireAuth(request),targetUid=cleanText(request.data?.targetUid,128);if(!targetUid||targetUid===a.uid)throw new HttpsError('invalid-argument','Invalid account.');const target=await db.doc(`users/${targetUid}`).get();if(!target.exists||!target.data()?.communityVisible)throw new HttpsError('not-found','Community profile unavailable.');const id=`${a.uid}_${targetUid}`;await db.doc(`followRequests/${id}`).set({sourceUid:a.uid,targetUid,status:'pending',createdAt:FieldValue.serverTimestamp()});return {ok:true}})
-export const respondToFollow = onCall({region:REGION,enforceAppCheck:false},async request=>{const a=requireAuth(request),sourceUid=cleanText(request.data?.sourceUid,128),accept=Boolean(request.data?.accept),reqRef=db.doc(`followRequests/${sourceUid}_${a.uid}`),snap=await reqRef.get();if(!snap.exists)throw new HttpsError('not-found','Follow request not found.');const batch=db.batch();if(accept){batch.set(db.doc(`users/${sourceUid}/following/${a.uid}`),{uid:a.uid,createdAt:FieldValue.serverTimestamp()});batch.set(db.doc(`users/${a.uid}/followers/${sourceUid}`),{uid:sourceUid,createdAt:FieldValue.serverTimestamp()})}batch.update(reqRef,{status:accept?'accepted':'declined',resolvedAt:FieldValue.serverTimestamp()});await batch.commit();return {ok:true}})
+export const prepareReportVerification = onCall(
+  {
+    region: REGION,
+    enforceAppCheck: false,
+    timeoutSeconds: 60,
+    memory: "512MiB",
+  },
+  async (request) => {
+    const a = requireAuth(request),
+      reportId = cleanText(request.data?.reportId, 64),
+      ref = db.doc(`reports/${reportId}`),
+      snap = await ref.get(),
+      data = snap.data();
+    if (
+      !snap.exists ||
+      data?.reporterId !== a.uid ||
+      data?.verificationStatus !== "uploaded" ||
+      !data.storagePath
+    )
+      throw new HttpsError(
+        "failed-precondition",
+        "The image upload has not been confirmed.",
+      );
+    const [bytes] = await getStorage()
+      .bucket()
+      .file(data.storagePath)
+      .download();
+    let metadata: {
+      latitude?: number;
+      longitude?: number;
+      DateTimeOriginal?: Date;
+      CreateDate?: Date;
+    } = {};
+    try {
+      const [gps, dates, full] = await Promise.all([
+        exifr.gps(bytes),
+        exifr.parse(bytes, ["DateTimeOriginal", "CreateDate"]),
+        exifr.parse(bytes, {
+          gps: true,
+          exif: true,
+          xmp: true,
+          reviveValues: true,
+        }),
+      ]);
+      metadata = {
+        ...(dates || {}),
+        ...(full || {}),
+        ...(appleLocation(
+          full?.GPSCoordinates ||
+            full?.location ||
+            full?.Location ||
+            full?.["com.apple.quicktime.location.ISO6709"],
+        ) || {}),
+        ...(gps || {}),
+      };
+    } catch (error) {
+      logger.warn("metadata-parse-failed", { reportId, error: String(error) });
+    }
+    const hasGps =
+        Number.isFinite(metadata.latitude) &&
+        Number.isFinite(metadata.longitude),
+      capturedAt = metadata.DateTimeOriginal || metadata.CreateDate || null;
+    await ref.update({
+      verificationStatus: "automated_review",
+      processingStatus: "ai_queued",
+      metadataParsedAt: FieldValue.serverTimestamp(),
+      metadataHasGps: hasGps,
+      metadataCapturedAt: capturedAt,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return { ok: true, hasGps, hasCaptureTime: Boolean(capturedAt) };
+  },
+);
 
-export const getAuthorityContext = onCall({region:REGION,enforceAppCheck:false},async request=>{const a=requireAuth(request),members=await db.collectionGroup('members').where('uid','==',a.uid).where('status','==','active').get();return {platformAdmin:a.token.platformAdmin===true,memberships:members.docs.map(d=>({organizationId:d.ref.parent.parent!.id,...d.data()}))}})
-export const createOrganization = onCall({region:REGION,enforceAppCheck:false},async request=>{const a=requireAuth(request);if(a.token.platformAdmin!==true)throw new HttpsError('permission-denied','Platform administrator required.');const name=cleanText(request.data?.name,120),city=cleanText(request.data?.city,80);if(name.length<3||city.length<2)throw new HttpsError('invalid-argument','Organization name and city are required.');const id=randomUUID(),batch=db.batch();batch.set(db.doc(`organizations/${id}`),{name,city,status:'verified',createdBy:a.uid,createdAt:FieldValue.serverTimestamp()});batch.set(db.doc(`organizations/${id}/members/${a.uid}`),{uid:a.uid,role:'org_admin',jurisdictionIds:[],status:'active',mfaRequired:true,createdAt:FieldValue.serverTimestamp()});batch.set(db.doc(`organizations/${id}/settings/current`),{riskRadiusMetres:250,provisionalHours:2,confirmedHours:24,alertRadiusKm:1.5,versionId:'default',updatedAt:FieldValue.serverTimestamp()});if(request.data?.makePilot===true)batch.set(db.doc('publicConfig/platform'),{pilotOrganizationId:id,updatedAt:FieldValue.serverTimestamp()},{merge:true});await batch.commit();await audit(a.uid,'create_organization','organization',id,id);return {organizationId:id}})
-export const inviteAuthorityMember = onCall({region:REGION,enforceAppCheck:false},async request=>{const organizationId=cleanText(request.data?.organizationId,80),email=cleanText(request.data?.email,180).toLowerCase(),role=cleanText(request.data?.role,40),jurisdictionIds=Array.isArray(request.data?.jurisdictionIds)?request.data.jurisdictionIds.map((v:unknown)=>cleanText(v,80)).slice(0,30):[],{auth}=await authority(request,organizationId,['org_admin']);if(!email.includes('@')||!['moderator','dispatcher','field_officer','analyst','org_admin'].includes(role))throw new HttpsError('invalid-argument','Valid email and role required.');const token=randomBytes(32).toString('base64url'),id=randomUUID();await db.doc(`organizations/${organizationId}/invites/${id}`).set({emailHash:sha(email),role,jurisdictionIds,status:'pending',tokenHash:sha(token),invitedBy:auth.uid,expiresAt:Timestamp.fromMillis(Date.now()+7*86_400_000),createdAt:FieldValue.serverTimestamp()});await audit(auth.uid,'invite_member','authorityInvite',id,organizationId,{role});return {inviteId:id,inviteToken:token,expiresInDays:7}})
-export const acceptAuthorityInvite = onCall({region:REGION,enforceAppCheck:false},async request=>{const a=requireAuth(request),organizationId=cleanText(request.data?.organizationId,80),inviteId=cleanText(request.data?.inviteId,80),token=cleanText(request.data?.token,200),ref=db.doc(`organizations/${organizationId}/invites/${inviteId}`),snap=await ref.get(),data=snap.data(),email=String(a.token.email||'').toLowerCase();if(!snap.exists||data?.status!=='pending'||data.tokenHash!==sha(token)||data.emailHash!==sha(email)||data.expiresAt.toMillis()<Date.now())throw new HttpsError('permission-denied','Invitation is invalid or expired.');const batch=db.batch();batch.set(db.doc(`organizations/${organizationId}/members/${a.uid}`),{uid:a.uid,email,role:data.role,jurisdictionIds:data.jurisdictionIds||[],status:'active',mfaRequired:true,createdAt:FieldValue.serverTimestamp()});batch.update(ref,{status:'accepted',acceptedBy:a.uid,acceptedAt:FieldValue.serverTimestamp()});await batch.commit();await getAuth().setCustomUserClaims(a.uid,{...((await getAuth().getUser(a.uid)).customClaims||{}),authorityStaff:true});await audit(a.uid,'accept_invite','authorityInvite',inviteId,organizationId);return {ok:true,requiresMfa:true}})
+async function verifyReport(reportId: string) {
+  const ref = db.doc(`reports/${reportId}`),
+    snap = await ref.get();
+  if (!snap.exists || snap.data()?.verificationStatus !== "automated_review")
+    return;
+  const data = snap.data()!,
+    file = getStorage().bucket().file(data.storagePath),
+    [bytes] = await file.download();
+  if (bytes.length > 12 * 1024 * 1024) throw new Error("PHOTO_TOO_LARGE");
+  const imageHash = createHash("sha256").update(bytes).digest("hex"),
+    duplicate = await db
+      .collection("reports")
+      .where("imageHash", "==", imageHash)
+      .limit(1)
+      .get();
+  if (!duplicate.empty && duplicate.docs[0].id !== reportId) {
+    await ref.update({
+      imageHash,
+      verificationStatus: "duplicate",
+      processingStatus: "complete",
+      aiReason: "This exact image was already submitted.",
+      rewardStatus: "ineligible",
+      verifiedAt: FieldValue.serverTimestamp(),
+    });
+    return;
+  }
+  let metadata: {
+    latitude?: number;
+    longitude?: number;
+    DateTimeOriginal?: Date;
+    CreateDate?: Date;
+  } = {};
+  try {
+    const [gps, dates, full] = await Promise.all([
+      exifr.gps(bytes),
+      exifr.parse(bytes, ["DateTimeOriginal", "CreateDate"]),
+      exifr.parse(bytes, {
+        gps: true,
+        exif: true,
+        xmp: true,
+        reviveValues: true,
+      }),
+    ]);
+    metadata = {
+      ...(dates || {}),
+      ...(full || {}),
+      ...(appleLocation(
+        full?.GPSCoordinates ||
+          full?.location ||
+          full?.Location ||
+          full?.["com.apple.quicktime.location.ISO6709"],
+      ) || {}),
+      ...(gps || {}),
+    };
+  } catch (error) {
+    logger.warn("exif-parse-failed", { reportId, error: String(error) });
+  }
+  const hasGps =
+      Number.isFinite(metadata.latitude) && Number.isFinite(metadata.longitude),
+    photoDistance = hasGps
+      ? distanceMetres(
+          { lat: data.lat, lng: data.lng },
+          { lat: metadata.latitude!, lng: metadata.longitude! },
+        )
+      : null,
+    capturedAt = metadata.DateTimeOriginal || metadata.CreateDate,
+    ageMs = capturedAt ? Date.now() - new Date(capturedAt).getTime() : null,
+    submittedAgo = data.createdAt?.toMillis
+      ? Date.now() - data.createdAt.toMillis()
+      : null,
+    liveCamera =
+      data.photoSource === "camera" &&
+      submittedAgo !== null &&
+      submittedAgo >= 0 &&
+      submittedAgo <= 10 * 60_000,
+    locationEvidence = !hasGps
+      ? liveCamera
+        ? "live-camera"
+        : "unverified"
+      : photoDistance! <= 200
+        ? "verified"
+        : "mismatch",
+    timeEvidence =
+      ageMs === null
+        ? liveCamera
+          ? "recent"
+          : "unverified"
+        : ageMs >= -600_000 && ageMs <= 86_400_000
+          ? "recent"
+          : "stale";
+  let analysis = bytes,
+    mime = "image/jpeg";
+  try {
+    analysis = await sharp(bytes)
+      .rotate()
+      .resize({
+        width: 1600,
+        height: 1600,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .jpeg({ quality: 82 })
+      .toBuffer();
+  } catch {
+    mime = "application/octet-stream";
+  }
+  const model = new GoogleGenerativeAI(geminiApiKey.value()).getGenerativeModel(
+    {
+      model: "gemini-3.6-flash",
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: SchemaType.OBJECT,
+          properties: {
+            containsDog: { type: SchemaType.BOOLEAN },
+            plausible: { type: SchemaType.BOOLEAN },
+            manipulationLikely: { type: SchemaType.BOOLEAN },
+            confidence: { type: SchemaType.NUMBER },
+            dogCount: { type: SchemaType.INTEGER },
+            observedSeverity: {
+              type: SchemaType.STRING,
+              format: "enum",
+              enum: ["low", "medium", "high"],
+            },
+            observedBehavior: {
+              type: SchemaType.STRING,
+              format: "enum",
+              enum: [
+                "calm",
+                "roaming",
+                "barking",
+                "chasing",
+                "aggressive",
+                "injured",
+                "unknown",
+              ],
+            },
+            sceneSummary: { type: SchemaType.STRING },
+            reason: { type: SchemaType.STRING },
+          },
+          required: [
+            "containsDog",
+            "plausible",
+            "manipulationLikely",
+            "confidence",
+            "dogCount",
+            "observedSeverity",
+            "observedBehavior",
+            "sceneSummary",
+            "reason",
+          ],
+        },
+      },
+    },
+  );
+  let verdict: {
+    containsDog: boolean;
+    plausible: boolean;
+    manipulationLikely: boolean;
+    confidence: number;
+    dogCount: number;
+    observedSeverity: Severity;
+    observedBehavior: string;
+    sceneSummary: string;
+    reason: string;
+  };
+  try {
+    const result = await model.generateContent([
+      `Conservatively verify a current community dog-safety report: "${data.description}". Count only visible real dogs. Detect screenshots, memes, synthetic or edited images. Do not infer aggression from breed. Return a factual scene summary without people-identifying details.`,
+      { inlineData: { data: analysis.toString("base64"), mimeType: mime } },
+    ]);
+    verdict = JSON.parse(result.response.text());
+  } catch (error) {
+    logger.error("gemini-failed", { reportId, error: String(error) });
+    await ref.update({
+      verificationStatus: "review_required",
+      processingStatus: "ai_failed",
+      aiReason: "Automated verification unavailable; queued for human review.",
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    await createReviewCase(reportId, data, ["ai_service_failure"]);
+    return;
+  }
+  const evidenceValid =
+      (locationEvidence === "verified" || locationEvidence === "live-camera") &&
+      timeEvidence === "recent",
+    visualConfidence =
+      verdict.containsDog && verdict.plausible && verdict.confidence >= 0.8,
+    dangerous =
+      verdict.observedSeverity === "high" ||
+      ["aggressive", "chasing", "injured"].includes(verdict.observedBehavior),
+    autoPublish = visualConfidence && !dangerous,
+    status =
+      !verdict.containsDog && verdict.confidence >= 0.8
+        ? "rejected"
+        : autoPublish
+          ? "provisional"
+          : "review_required",
+    evidenceQuality =
+      evidenceValid && !verdict.manipulationLikely ? "strong" : "limited",
+    reason =
+      locationEvidence === "mismatch"
+        ? `Photo location differs by ${Math.round(photoDistance!)} m.`
+        : locationEvidence === "unverified"
+          ? "Location evidence could not be verified."
+          : timeEvidence === "stale"
+            ? "Photo appears older than 24 hours."
+            : verdict.reason,
+    updates = {
+      imageHash,
+      verificationStatus: status,
+      processingStatus: "complete",
+      decisionSource: autoPublish
+        ? "ai_only"
+        : status === "rejected"
+          ? "ai_rejection"
+          : "human_required",
+      humanReviewRequired: status === "review_required",
+      evidenceQuality,
+      aiReason: cleanText(reason, 180),
+      aiSummary: cleanText(verdict.sceneSummary, 300),
+      aiConfidence: Math.max(0, Math.min(1, verdict.confidence)),
+      dogCount: Math.max(0, Math.min(30, verdict.dogCount)),
+      observedSeverity: verdict.observedSeverity,
+      observedBehavior: verdict.observedBehavior,
+      locationEvidence,
+      timeEvidence,
+      photoDistanceMetres: photoDistance,
+      photoCapturedAt: capturedAt || null,
+      manipulationLikely: verdict.manipulationLikely,
+      verifiedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+  await ref.update(updates);
+  if (autoPublish) {
+    await db
+      .doc(`publicSightings/${reportId}`)
+      .set({
+        ...publicReport(
+          reportId,
+          { ...data, ...updates },
+          "provisional",
+          evidenceQuality === "strong" ? 6 : 2,
+        ),
+        evidenceQuality,
+      });
+    await db.doc(`reviewCases/${reportId}`).delete();
+    return;
+  }
+  if (status === "review_required")
+    await createReviewCase(
+      reportId,
+      { ...data, ...updates },
+      dangerous ? ["dangerous_behavior"] : ["low_ai_confidence"],
+    );
+}
 
-export const transitionAuthorityAction = onCall({region:REGION,enforceAppCheck:false},async request=>{const organizationId=cleanText(request.data?.organizationId,80),actionId=cleanText(request.data?.actionId,80)||randomUUID(),next=cleanText(request.data?.status||'pending',30),note=cleanText(request.data?.note,500),type=cleanText(request.data?.actionType,60);const {auth}=await authority(request,organizationId,['dispatcher','field_officer','org_admin']);if(!['pending','assigned','in_progress','completed','cancelled'].includes(next))throw new HttpsError('invalid-argument','Invalid action status.');const ref=db.doc(`authorityActions/${actionId}`),snap=await ref.get();if(!snap.exists){if(!type)throw new HttpsError('invalid-argument','Action type required.');await ref.set({organizationId,actionType:type,status:next,note,createdBy:auth.uid,assignedTo:cleanText(request.data?.assignedTo,128)||null,createdAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()})}else await ref.update({status:next,note,updatedBy:auth.uid,updatedAt:FieldValue.serverTimestamp(),completedAt:next==='completed'?FieldValue.serverTimestamp():null});await ref.collection('events').add({status:next,note,actorId:auth.uid,createdAt:FieldValue.serverTimestamp()});await audit(auth.uid,'transition_action','authorityAction',actionId,organizationId,{status:next});return {actionId}})
+async function createReviewCase(
+  reportId: string,
+  data: FirebaseFirestore.DocumentData,
+  reasons: string[],
+) {
+  await db
+    .doc(`reviewCases/${reportId}`)
+    .set(
+      {
+        reportId,
+        reporterId: data.reporterId,
+        organizationId: data.organizationId || null,
+        jurisdictionId: data.jurisdictionId || null,
+        priority:
+          data.observedSeverity === "high" || data.severity === "high"
+            ? "high"
+            : "normal",
+        status: "open",
+        reasonCodes: reasons,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+}
+export const processPendingReport = onDocumentUpdated(
+  {
+    document: "reports/{reportId}",
+    region: REGION,
+    secrets: [geminiApiKey],
+    timeoutSeconds: 180,
+    memory: "512MiB",
+    maxInstances: 20,
+  },
+  async (event) => {
+    const before = event.data?.before.data(),
+      after = event.data?.after.data();
+    if (
+      !after ||
+      after.verificationStatus !== "automated_review" ||
+      !after.storagePath ||
+      (before?.storagePath === after.storagePath &&
+        before?.verificationStatus === "automated_review")
+    )
+      return;
+    try {
+      await verifyReport(event.params.reportId);
+    } catch (error) {
+      logger.error("report-processing-failed", {
+        reportId: event.params.reportId,
+        error: String(error),
+      });
+      await event.data!.after.ref.update({
+        verificationStatus: "review_required",
+        processingStatus: "failed",
+        aiReason: "Verification failed safely; queued for review.",
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      await createReviewCase(event.params.reportId, after, [
+        "pipeline_failure",
+      ]);
+    }
+  },
+);
 
-export const proposeOrganizationConfig = onCall({region:REGION,enforceAppCheck:false},async request=>{const organizationId=cleanText(request.data?.organizationId,80),{auth}=await authority(request,organizationId,['org_admin']),values=request.data?.values||{},reason=cleanText(request.data?.reason,300);if(reason.length<10)throw new HttpsError('invalid-argument','Explain why this change is needed.');for(const[key,[min,max]]of Object.entries(CONFIG_LIMITS)){if(values[key]!==undefined&&(!Number.isFinite(values[key])||values[key]<min||values[key]>max))throw new HttpsError('invalid-argument',`${key} must be between ${min} and ${max}.`)}const id=randomUUID();await db.doc(`organizations/${organizationId}/configVersions/${id}`).set({values,reason,status:'proposed',proposedBy:auth.uid,createdAt:FieldValue.serverTimestamp()});await audit(auth.uid,'propose_config','configVersion',id,organizationId,{values});return {configVersionId:id}})
-export const approveOrganizationConfig = onCall({region:REGION,enforceAppCheck:false},async request=>{const organizationId=cleanText(request.data?.organizationId,80),id=cleanText(request.data?.configVersionId,80),{auth}=await authority(request,organizationId,['org_admin']),ref=db.doc(`organizations/${organizationId}/configVersions/${id}`),snap=await ref.get(),data=snap.data();if(!snap.exists||data?.status!=='proposed'||data.proposedBy===auth.uid)throw new HttpsError('failed-precondition','A different organization administrator must approve this proposal.');const batch=db.batch();batch.update(ref,{status:'active',approvedBy:auth.uid,activatedAt:FieldValue.serverTimestamp()});batch.set(db.doc(`organizations/${organizationId}/settings/current`),{...data.values,versionId:id,updatedAt:FieldValue.serverTimestamp()});await batch.commit();await audit(auth.uid,'approve_config','configVersion',id,organizationId);return {ok:true}})
+export const recoverStalledReports = onSchedule(
+  {
+    region: REGION,
+    schedule: "every 10 minutes",
+    timeZone: "Asia/Kolkata",
+    secrets: [geminiApiKey],
+    timeoutSeconds: 300,
+    memory: "512MiB",
+  },
+  async () => {
+    const uploaded = await db
+      .collection("reports")
+      .where("verificationStatus", "==", "uploaded")
+      .where("updatedAt", "<=", Timestamp.fromMillis(Date.now() - 5 * 60_000))
+      .limit(20)
+      .get();
+    for (const report of uploaded.docs)
+      await report.ref.update({
+        verificationStatus: "automated_review",
+        processingStatus: "ai_queued",
+        metadataParsedAt: FieldValue.serverTimestamp(),
+        metadataHasGps: false,
+        metadataRecovery: true,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    const cutoff = Timestamp.fromMillis(Date.now() - 5 * 60_000),
+      queued = await db
+        .collection("reports")
+        .where("verificationStatus", "==", "automated_review")
+        .where("updatedAt", "<=", cutoff)
+        .limit(20)
+        .get();
+    for (const report of queued.docs) {
+      try {
+        await verifyReport(report.id);
+      } catch (error) {
+        logger.error("stalled-report-recovery-failed", {
+          reportId: report.id,
+          error: String(error),
+        });
+        await report.ref.update({
+          verificationStatus: "review_required",
+          processingStatus: "failed",
+          aiReason:
+            "Automated verification timed out; queued for human review.",
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        await createReviewCase(report.id, report.data(), [
+          "verification_timeout",
+        ]);
+      }
+    }
+    const abandoned = await db
+      .collection("reports")
+      .where("verificationStatus", "==", "uploading")
+      .where("updatedAt", "<=", Timestamp.fromMillis(Date.now() - 30 * 60_000))
+      .limit(50)
+      .get();
+    for (const report of abandoned.docs)
+      await report.ref.update({
+        verificationStatus: "expired",
+        processingStatus: "upload_failed",
+        aiReason:
+          "Photo upload did not finish. Please submit the report again.",
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+  },
+);
+
+async function awardConfirmedReport(
+  reportId: string,
+  data: FirebaseFirestore.DocumentData,
+) {
+  if (data.rewardStatus !== "pending" || data.photoSource !== "camera") return;
+  const userRef = db.doc(`users/${data.reporterId}`),
+    eventRef = db.doc(
+      `users/${data.reporterId}/rewardEvents/report-${reportId}`,
+    );
+  await db.runTransaction(async (tx) => {
+    if ((await tx.get(eventRef)).exists) return;
+    const user = (await tx.get(userRef)).data();
+    if (!user?.phoneVerified) return;
+    const today = new Date().toISOString().slice(0, 10),
+      last = user.lastStreakDate as string | undefined,
+      yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10),
+      streak =
+        last === today
+          ? user.currentStreak || 0
+          : last === yesterday
+            ? (user.currentStreak || 0) + 1
+            : 1;
+    tx.set(eventRef, {
+      type: "confirmed_report",
+      reportId,
+      points: 10,
+      status: "credited",
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    tx.update(userRef, {
+      impactPoints: FieldValue.increment(10),
+      confirmedReports: FieldValue.increment(1),
+      currentStreak: streak,
+      lastStreakDate: today,
+      trustTier:
+        (user.confirmedReports || 0) >= 19
+          ? "guardian"
+          : (user.confirmedReports || 0) >= 4
+            ? "trusted"
+            : "contributor",
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    tx.update(db.doc(`reports/${reportId}`), {
+      rewardStatus: "credited",
+      pointsAwarded: 10,
+    });
+  });
+}
+
+export const reviewReport = onCall(
+  { region: REGION, enforceAppCheck: false },
+  async (request) => {
+    const organizationId = cleanText(request.data?.organizationId, 80),
+      reportId = cleanText(request.data?.reportId, 80),
+      decision = request.data?.decision as ReviewDecision,
+      reason = cleanText(request.data?.reason, 300);
+    if (
+      !reportId ||
+      !["confirmed", "rejected", "duplicate"].includes(decision) ||
+      reason.length < 5
+    )
+      throw new HttpsError(
+        "invalid-argument",
+        "Report, decision, and reason are required.",
+      );
+    const { auth } = await authority(request, organizationId, [
+      "moderator",
+      "org_admin",
+    ]);
+    const ref = db.doc(`reports/${reportId}`),
+      snap = await ref.get(),
+      data = snap.data();
+    if (
+      !snap.exists ||
+      !data ||
+      (data.organizationId && data.organizationId !== organizationId)
+    )
+      throw new HttpsError(
+        "not-found",
+        "Report not found in this jurisdiction.",
+      );
+    await ref.update({
+      verificationStatus: decision,
+      moderatorReason: reason,
+      reviewerId: auth.uid,
+      reviewedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    if (decision === "confirmed") {
+      await db
+        .doc(`publicSightings/${reportId}`)
+        .set(publicReport(reportId, data, "confirmed", 24));
+      await awardConfirmedReport(reportId, data);
+    } else await db.doc(`publicSightings/${reportId}`).delete();
+    await db
+      .doc(`reviewCases/${reportId}`)
+      .set(
+        {
+          status: "resolved",
+          decision,
+          reviewerId: auth.uid,
+          resolvedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+    await audit(auth.uid, "review_report", "report", reportId, organizationId, {
+      decision,
+      reason,
+    });
+    return { ok: true };
+  },
+);
+
+export const getReportEvidenceUrl = onCall(
+  { region: REGION, enforceAppCheck: false },
+  async (request) => {
+    const organizationId = cleanText(request.data?.organizationId, 80),
+      reportId = cleanText(request.data?.reportId, 80);
+    await authority(request, organizationId, ["moderator", "org_admin"]);
+    const snap = await db.doc(`reports/${reportId}`).get(),
+      data = snap.data();
+    if (
+      !snap.exists ||
+      !data?.storagePath ||
+      data.organizationId !== organizationId
+    )
+      throw new HttpsError("not-found", "Evidence not found.");
+    const [url] = await getStorage()
+      .bucket()
+      .file(data.storagePath)
+      .getSignedUrl({ action: "read", expires: Date.now() + 10 * 60_000 });
+    return { url, expiresInSeconds: 600 };
+  },
+);
+
+export const updateUserSettings = onCall(
+  { region: REGION, enforceAppCheck: false },
+  async (request) => {
+    const a = requireAuth(request),
+      allowed = {
+        language: cleanText(request.data?.language || "en", 12),
+        communityVisible: Boolean(request.data?.communityVisible),
+        leaderboardVisible: Boolean(request.data?.leaderboardVisible),
+        pushEnabled: Boolean(request.data?.pushEnabled),
+        homeArea: cleanText(request.data?.homeArea, 120) || null,
+      };
+    await db.doc(`userSettings/${a.uid}`).set(allowed, { merge: true });
+    await db
+      .doc(`users/${a.uid}`)
+      .set(
+        {
+          language: allowed.language,
+          communityVisible: allowed.communityVisible,
+          leaderboardVisible: allowed.leaderboardVisible,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+    return { ok: true };
+  },
+);
+export const exportMyData = onCall(
+  { region: REGION, enforceAppCheck: false },
+  async (request) => {
+    const a = requireAuth(request),
+      [profile, privateData, settings, reports] = await Promise.all([
+        db.doc(`users/${a.uid}`).get(),
+        db.doc(`userPrivate/${a.uid}`).get(),
+        db.doc(`userSettings/${a.uid}`).get(),
+        db
+          .collection("reports")
+          .where("reporterId", "==", a.uid)
+          .limit(200)
+          .get(),
+      ]);
+    return {
+      generatedAt: new Date().toISOString(),
+      profile: profile.data() || null,
+      private: privateData.data() || null,
+      settings: settings.data() || null,
+      reports: reports.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+        storagePath: undefined,
+        imageHash: undefined,
+      })),
+    };
+  },
+);
+export const requestAccountDeletion = onCall(
+  { region: REGION, enforceAppCheck: false },
+  async (request) => {
+    const a = requireAuth(request),
+      executeAfter = Timestamp.fromMillis(Date.now() + 7 * 86_400_000);
+    await db
+      .doc(`deletionRequests/${a.uid}`)
+      .set({
+        uid: a.uid,
+        status: "cooling_off",
+        executeAfter,
+        requestedAt: FieldValue.serverTimestamp(),
+      });
+    await db
+      .doc(`users/${a.uid}`)
+      .set(
+        {
+          contributionStatus: "suspended",
+          deletionRequestedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+    await audit(a.uid, "request_account_deletion", "user", a.uid);
+    return { executeAfter: executeAfter.toDate().toISOString() };
+  },
+);
+export const cancelAccountDeletion = onCall(
+  { region: REGION, enforceAppCheck: false },
+  async (request) => {
+    const a = requireAuth(request),
+      ref = db.doc(`deletionRequests/${a.uid}`),
+      snap = await ref.get();
+    if (!snap.exists || snap.data()?.status !== "cooling_off")
+      throw new HttpsError(
+        "failed-precondition",
+        "No cancellable deletion request.",
+      );
+    await ref.update({
+      status: "cancelled",
+      cancelledAt: FieldValue.serverTimestamp(),
+    });
+    await db
+      .doc(`users/${a.uid}`)
+      .set(
+        {
+          contributionStatus: "active",
+          deletionRequestedAt: FieldValue.delete(),
+        },
+        { merge: true },
+      );
+    return { ok: true };
+  },
+);
+export const executeAccountDeletions = onSchedule(
+  { region: REGION, schedule: "every day 02:30", timeZone: "Asia/Kolkata" },
+  async () => {
+    const due = await db
+      .collection("deletionRequests")
+      .where("status", "==", "cooling_off")
+      .where("executeAfter", "<=", Timestamp.now())
+      .limit(50)
+      .get();
+    for (const request of due.docs) {
+      const uid = request.id,
+        reports = await db
+          .collection("reports")
+          .where("reporterId", "==", uid)
+          .limit(400)
+          .get(),
+        batch = db.batch();
+      for (const report of reports.docs)
+        batch.update(report.ref, {
+          reporterId: null,
+          reporterDeleted: true,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      batch.update(request.ref, {
+        status: "executing",
+        startedAt: FieldValue.serverTimestamp(),
+      });
+      await batch.commit();
+      await db.recursiveDelete(db.doc(`users/${uid}`));
+      await Promise.all([
+        db.doc(`userPrivate/${uid}`).delete(),
+        db.doc(`userSettings/${uid}`).delete(),
+      ]);
+      try {
+        await getAuth().deleteUser(uid);
+      } catch (error) {
+        logger.warn("delete-auth-user-failed", { uid, error: String(error) });
+      }
+      await request.ref.set({
+        uid,
+        status: "complete",
+        completedAt: FieldValue.serverTimestamp(),
+      });
+    }
+  },
+);
+
+export const followUser = onCall(
+  { region: REGION, enforceAppCheck: false },
+  async (request) => {
+    const a = requireAuth(request),
+      targetUid = cleanText(request.data?.targetUid, 128);
+    if (!targetUid || targetUid === a.uid)
+      throw new HttpsError("invalid-argument", "Invalid account.");
+    const target = await db.doc(`users/${targetUid}`).get();
+    if (!target.exists || !target.data()?.communityVisible)
+      throw new HttpsError("not-found", "Community profile unavailable.");
+    const id = `${a.uid}_${targetUid}`;
+    await db
+      .doc(`followRequests/${id}`)
+      .set({
+        sourceUid: a.uid,
+        targetUid,
+        status: "pending",
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    return { ok: true };
+  },
+);
+export const respondToFollow = onCall(
+  { region: REGION, enforceAppCheck: false },
+  async (request) => {
+    const a = requireAuth(request),
+      sourceUid = cleanText(request.data?.sourceUid, 128),
+      accept = Boolean(request.data?.accept),
+      reqRef = db.doc(`followRequests/${sourceUid}_${a.uid}`),
+      snap = await reqRef.get();
+    if (!snap.exists)
+      throw new HttpsError("not-found", "Follow request not found.");
+    const batch = db.batch();
+    if (accept) {
+      batch.set(db.doc(`users/${sourceUid}/following/${a.uid}`), {
+        uid: a.uid,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      batch.set(db.doc(`users/${a.uid}/followers/${sourceUid}`), {
+        uid: sourceUid,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    }
+    batch.update(reqRef, {
+      status: accept ? "accepted" : "declined",
+      resolvedAt: FieldValue.serverTimestamp(),
+    });
+    await batch.commit();
+    return { ok: true };
+  },
+);
+
+export const getAuthorityContext = onCall(
+  { region: REGION, enforceAppCheck: false },
+  async (request) => {
+    const a = requireAuth(request),
+      members = await db
+        .collectionGroup("members")
+        .where("uid", "==", a.uid)
+        .where("status", "==", "active")
+        .get();
+    return {
+      platformAdmin: a.token.platformAdmin === true,
+      memberships: members.docs.map((d) => ({
+        organizationId: d.ref.parent.parent!.id,
+        ...d.data(),
+      })),
+    };
+  },
+);
+export const createOrganization = onCall(
+  { region: REGION, enforceAppCheck: false },
+  async (request) => {
+    const a = requireAuth(request);
+    if (a.token.platformAdmin !== true)
+      throw new HttpsError(
+        "permission-denied",
+        "Platform administrator required.",
+      );
+    const name = cleanText(request.data?.name, 120),
+      city = cleanText(request.data?.city, 80);
+    if (name.length < 3 || city.length < 2)
+      throw new HttpsError(
+        "invalid-argument",
+        "Organization name and city are required.",
+      );
+    const id = randomUUID(),
+      batch = db.batch();
+    batch.set(db.doc(`organizations/${id}`), {
+      name,
+      city,
+      status: "verified",
+      createdBy: a.uid,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    batch.set(db.doc(`organizations/${id}/members/${a.uid}`), {
+      uid: a.uid,
+      role: "org_admin",
+      jurisdictionIds: [],
+      status: "active",
+      mfaRequired: true,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    batch.set(db.doc(`organizations/${id}/settings/current`), {
+      riskRadiusMetres: 250,
+      provisionalHours: 2,
+      confirmedHours: 24,
+      alertRadiusKm: 1.5,
+      versionId: "default",
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    if (request.data?.makePilot === true)
+      batch.set(
+        db.doc("publicConfig/platform"),
+        { pilotOrganizationId: id, updatedAt: FieldValue.serverTimestamp() },
+        { merge: true },
+      );
+    await batch.commit();
+    await audit(a.uid, "create_organization", "organization", id, id);
+    return { organizationId: id };
+  },
+);
+export const inviteAuthorityMember = onCall(
+  { region: REGION, enforceAppCheck: false },
+  async (request) => {
+    const organizationId = cleanText(request.data?.organizationId, 80),
+      email = cleanText(request.data?.email, 180).toLowerCase(),
+      role = cleanText(request.data?.role, 40),
+      jurisdictionIds = Array.isArray(request.data?.jurisdictionIds)
+        ? request.data.jurisdictionIds
+            .map((v: unknown) => cleanText(v, 80))
+            .slice(0, 30)
+        : [],
+      { auth } = await authority(request, organizationId, ["org_admin"]);
+    if (
+      !email.includes("@") ||
+      ![
+        "moderator",
+        "dispatcher",
+        "field_officer",
+        "analyst",
+        "org_admin",
+      ].includes(role)
+    )
+      throw new HttpsError(
+        "invalid-argument",
+        "Valid email and role required.",
+      );
+    const token = randomBytes(32).toString("base64url"),
+      id = randomUUID();
+    await db
+      .doc(`organizations/${organizationId}/invites/${id}`)
+      .set({
+        emailHash: sha(email),
+        role,
+        jurisdictionIds,
+        status: "pending",
+        tokenHash: sha(token),
+        invitedBy: auth.uid,
+        expiresAt: Timestamp.fromMillis(Date.now() + 7 * 86_400_000),
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    await audit(
+      auth.uid,
+      "invite_member",
+      "authorityInvite",
+      id,
+      organizationId,
+      { role },
+    );
+    return { inviteId: id, inviteToken: token, expiresInDays: 7 };
+  },
+);
+export const acceptAuthorityInvite = onCall(
+  { region: REGION, enforceAppCheck: false },
+  async (request) => {
+    const a = requireAuth(request),
+      organizationId = cleanText(request.data?.organizationId, 80),
+      inviteId = cleanText(request.data?.inviteId, 80),
+      token = cleanText(request.data?.token, 200),
+      ref = db.doc(`organizations/${organizationId}/invites/${inviteId}`),
+      snap = await ref.get(),
+      data = snap.data(),
+      email = String(a.token.email || "").toLowerCase();
+    if (
+      !snap.exists ||
+      data?.status !== "pending" ||
+      data.tokenHash !== sha(token) ||
+      data.emailHash !== sha(email) ||
+      data.expiresAt.toMillis() < Date.now()
+    )
+      throw new HttpsError(
+        "permission-denied",
+        "Invitation is invalid or expired.",
+      );
+    const batch = db.batch();
+    batch.set(db.doc(`organizations/${organizationId}/members/${a.uid}`), {
+      uid: a.uid,
+      email,
+      role: data.role,
+      jurisdictionIds: data.jurisdictionIds || [],
+      status: "active",
+      mfaRequired: true,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    batch.update(ref, {
+      status: "accepted",
+      acceptedBy: a.uid,
+      acceptedAt: FieldValue.serverTimestamp(),
+    });
+    await batch.commit();
+    await getAuth().setCustomUserClaims(a.uid, {
+      ...((await getAuth().getUser(a.uid)).customClaims || {}),
+      authorityStaff: true,
+    });
+    await audit(
+      a.uid,
+      "accept_invite",
+      "authorityInvite",
+      inviteId,
+      organizationId,
+    );
+    return { ok: true, requiresMfa: true };
+  },
+);
+
+export const transitionAuthorityAction = onCall(
+  { region: REGION, enforceAppCheck: false },
+  async (request) => {
+    const organizationId = cleanText(request.data?.organizationId, 80),
+      actionId = cleanText(request.data?.actionId, 80) || randomUUID(),
+      next = cleanText(request.data?.status || "pending", 30),
+      note = cleanText(request.data?.note, 500),
+      type = cleanText(request.data?.actionType, 60);
+    const { auth } = await authority(request, organizationId, [
+      "dispatcher",
+      "field_officer",
+      "org_admin",
+    ]);
+    if (
+      ![
+        "pending",
+        "assigned",
+        "in_progress",
+        "completed",
+        "cancelled",
+      ].includes(next)
+    )
+      throw new HttpsError("invalid-argument", "Invalid action status.");
+    const ref = db.doc(`authorityActions/${actionId}`),
+      snap = await ref.get();
+    if (!snap.exists) {
+      if (!type)
+        throw new HttpsError("invalid-argument", "Action type required.");
+      await ref.set({
+        organizationId,
+        actionType: type,
+        status: next,
+        note,
+        createdBy: auth.uid,
+        assignedTo: cleanText(request.data?.assignedTo, 128) || null,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    } else
+      await ref.update({
+        status: next,
+        note,
+        updatedBy: auth.uid,
+        updatedAt: FieldValue.serverTimestamp(),
+        completedAt: next === "completed" ? FieldValue.serverTimestamp() : null,
+      });
+    await ref
+      .collection("events")
+      .add({
+        status: next,
+        note,
+        actorId: auth.uid,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    await audit(
+      auth.uid,
+      "transition_action",
+      "authorityAction",
+      actionId,
+      organizationId,
+      { status: next },
+    );
+    return { actionId };
+  },
+);
+
+export const proposeOrganizationConfig = onCall(
+  { region: REGION, enforceAppCheck: false },
+  async (request) => {
+    const organizationId = cleanText(request.data?.organizationId, 80),
+      { auth } = await authority(request, organizationId, ["org_admin"]),
+      values = request.data?.values || {},
+      reason = cleanText(request.data?.reason, 300);
+    if (reason.length < 10)
+      throw new HttpsError(
+        "invalid-argument",
+        "Explain why this change is needed.",
+      );
+    for (const [key, [min, max]] of Object.entries(CONFIG_LIMITS)) {
+      if (
+        values[key] !== undefined &&
+        (!Number.isFinite(values[key]) ||
+          values[key] < min ||
+          values[key] > max)
+      )
+        throw new HttpsError(
+          "invalid-argument",
+          `${key} must be between ${min} and ${max}.`,
+        );
+    }
+    const id = randomUUID();
+    await db
+      .doc(`organizations/${organizationId}/configVersions/${id}`)
+      .set({
+        values,
+        reason,
+        status: "proposed",
+        proposedBy: auth.uid,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    await audit(
+      auth.uid,
+      "propose_config",
+      "configVersion",
+      id,
+      organizationId,
+      { values },
+    );
+    return { configVersionId: id };
+  },
+);
+export const approveOrganizationConfig = onCall(
+  { region: REGION, enforceAppCheck: false },
+  async (request) => {
+    const organizationId = cleanText(request.data?.organizationId, 80),
+      id = cleanText(request.data?.configVersionId, 80),
+      { auth } = await authority(request, organizationId, ["org_admin"]),
+      ref = db.doc(`organizations/${organizationId}/configVersions/${id}`),
+      snap = await ref.get(),
+      data = snap.data();
+    if (
+      !snap.exists ||
+      data?.status !== "proposed" ||
+      data.proposedBy === auth.uid
+    )
+      throw new HttpsError(
+        "failed-precondition",
+        "A different organization administrator must approve this proposal.",
+      );
+    const batch = db.batch();
+    batch.update(ref, {
+      status: "active",
+      approvedBy: auth.uid,
+      activatedAt: FieldValue.serverTimestamp(),
+    });
+    batch.set(db.doc(`organizations/${organizationId}/settings/current`), {
+      ...data.values,
+      versionId: id,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    await batch.commit();
+    await audit(
+      auth.uid,
+      "approve_config",
+      "configVersion",
+      id,
+      organizationId,
+    );
+    return { ok: true };
+  },
+);
 
 // Legacy callable retained only to return a safe migration error to old clients.
-export const verifySighting = onCall({region:REGION,enforceAppCheck:false},async()=>{throw new HttpsError('failed-precondition','Update Pawlytics and resubmit through the secure report flow.')})
+export const verifySighting = onCall(
+  { region: REGION, enforceAppCheck: false },
+  async () => {
+    throw new HttpsError(
+      "failed-precondition",
+      "Update Pawlytics and resubmit through the secure report flow.",
+    );
+  },
+);
