@@ -1,11 +1,52 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /sightings/{id} {
-      allow read: if resource.data.verificationStatus == 'approved' || (request.auth != null && resource.data.reporterId == request.auth.uid);
-      allow create: if request.auth != null && request.resource.data.reporterId == request.auth.uid && request.resource.data.verificationStatus == 'pending';
-      allow update: if request.auth != null && resource.data.reporterId == request.auth.uid && resource.data.verificationStatus == 'pending' && request.resource.data.verificationStatus == 'pending' && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['imageUrl','processingStatus']);
-      allow delete: if false;
+    function signedIn() { return request.auth != null; }
+    function owns(uid) { return signedIn() && request.auth.uid == uid; }
+    function platformAdmin() { return signedIn() && request.auth.token.platformAdmin == true; }
+    function activeMember(orgId) {
+      return signedIn() && orgId != null
+        && exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid))
+        && get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.status == 'active';
     }
+
+    match /publicSightings/{id} { allow read: if true; allow write: if false; }
+    match /publicHotspots/{id} { allow read: if true; allow write: if false; }
+    match /publicConfig/{id} { allow read: if true; allow write: if false; }
+    match /challenges/{id} { allow read: if true; allow write: if false; }
+    match /leaderboards/{id} { allow read: if true; allow write: if false; }
+    match /reports/{id} {
+      allow read: if signedIn() && (resource.data.reporterId == request.auth.uid || platformAdmin() || activeMember(resource.data.organizationId));
+      allow write: if false;
+    }
+    match /users/{uid} {
+      allow read: if owns(uid) || resource.data.communityVisible == true || platformAdmin();
+      allow write: if false;
+    }
+    match /userPrivate/{uid} { allow read: if owns(uid) || platformAdmin(); allow write: if false; }
+    match /userSettings/{uid} {
+      allow read: if owns(uid);
+      allow update: if owns(uid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['language','communityVisible','leaderboardVisible','pushEnabled','homeArea']);
+      allow create, delete: if false;
+    }
+    match /users/{uid}/following/{targetUid} { allow read: if owns(uid); allow write: if false; }
+    match /users/{uid}/followers/{sourceUid} { allow read: if owns(uid); allow write: if false; }
+    match /users/{uid}/rewardEvents/{id} { allow read: if owns(uid); allow write: if false; }
+    match /users/{uid}/consents/{id} { allow read: if owns(uid); allow write: if false; }
+    match /organizations/{orgId} {
+      allow read: if platformAdmin() || activeMember(orgId);
+      allow write: if false;
+      match /members/{uid} { allow read: if owns(uid) || platformAdmin() || activeMember(orgId); allow write: if false; }
+      match /{document=**} { allow read: if platformAdmin() || activeMember(orgId); allow write: if false; }
+    }
+    match /reviewCases/{id} { allow read: if platformAdmin() || activeMember(resource.data.organizationId); allow write: if false; }
+    match /authorityActions/{id} { allow read: if platformAdmin() || activeMember(resource.data.organizationId); allow write: if false; }
+    match /auditLogs/{id} { allow read: if platformAdmin() || activeMember(resource.data.organizationId); allow write: if false; }
+    match /abuseCases/{id} { allow read: if platformAdmin() || activeMember(resource.data.organizationId); allow write: if false; }
+    match /sightings/{id} {
+      allow read: if signedIn() && (resource.data.reporterId == request.auth.uid || platformAdmin());
+      allow write: if false;
+    }
+    match /{document=**} { allow read, write: if false; }
   }
 }
