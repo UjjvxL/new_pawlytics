@@ -15,6 +15,7 @@ export interface Sighting {
   createdAt?: { toDate: () => Date } | Date
   expiresAt?: { toDate: () => Date } | Date
   verificationStatus: VerificationStatus
+  processingStatus?: string
   aiReason?: string
   aiSummary?: string
   observedBehavior?: string

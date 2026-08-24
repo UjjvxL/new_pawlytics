@@ -8,7 +8,6 @@ import {
   query,
   where,
 } from "firebase/firestore";
-import { ref, uploadBytes } from "firebase/storage";
 import {
   getRedirectResult,
   linkWithCredential,
@@ -50,7 +49,6 @@ import {
   functions,
   isFirebaseConfigured,
   provider,
-  storage,
 } from "./firebase";
 import type { Severity, Sighting, UserProfile } from "./types";
 
@@ -2243,6 +2241,8 @@ function ReportSheet({
   );
   const [saving, setSaving] = useState(false);
   const [stage, setStage] = useState("");
+  const uploadSteps = ["Location", "Secure report", "Prepare photo", "Upload", "AI queue"];
+  const stageNumber = stage.includes("location") ? 1 : stage.includes("secure") ? 2 : stage.includes("Preparing") ? 3 : stage.includes("Uploading") ? 4 : stage.includes("Queuing") ? 5 : 0;
   function dictate() {
     const SpeechRecognition =
       (
@@ -2300,9 +2300,8 @@ function ReportSheet({
         photoSource,
         idempotencyKey,
       });
-      const { reportId, storagePath } = session.data as {
+      const { reportId } = session.data as {
         reportId: string;
-        storagePath: string;
       };
       currentStage = "Preparing photo…";
       setStage(currentStage);
@@ -2311,19 +2310,18 @@ function ReportSheet({
         throw new Error("PHOTO_TOO_LARGE");
       currentStage = "Uploading photo…";
       setStage(currentStage);
-      const imageRef = ref(
-        storage,
-        `${storagePath}-${Date.now()}-${preparedPhoto.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`,
-      );
-      await uploadBytes(imageRef, preparedPhoto, {
-        contentType: preparedPhoto.type,
+      const imageBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error("PHOTO_READ_FAILED"));
+        reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+        reader.readAsDataURL(preparedPhoto);
       });
       currentStage = "Queuing verification…";
       setStage(currentStage);
       await httpsCallable(
         functions,
-        "finalizeReportUpload",
-      )({ reportId, storagePath: imageRef.fullPath });
+        "uploadReportEvidence",
+      )({ reportId, imageBase64, contentType: preparedPhoto.type });
       close();
       onStatus(
         "Report submitted. Gemini will verify it in the background—check the bell for the result.",
@@ -2362,6 +2360,7 @@ function ReportSheet({
           </div>
         </div>
         <form onSubmit={submit}>
+          {saving && <div className="report-progress" role="status" aria-live="polite"><div className="verification-orbit"><ShieldCheck size={25}/><i/></div><strong>{stage}</strong><span>Keep Pawlytics open until the upload finishes.</span><ol>{uploadSteps.map((label,index)=><li key={label} className={index+1<stageNumber?'done':index+1===stageNumber?'active':''}><i>{index+1<stageNumber?'✓':index+1}</i><small>{label}</small></li>)}</ol></div>}
           <div className="voice-heading">
             <label className="field-label">What is happening?</label>
             <select
@@ -2614,7 +2613,7 @@ function ReportsPanel({
     URL.revokeObjectURL(url);
   }
   const pending = (status: Sighting["verificationStatus"]) =>
-    ["uploading", "automated_review", "review_required", "pending"].includes(
+    ["uploading", "automated_review", "pending"].includes(
       status,
     );
   const protecting = (status: Sighting["verificationStatus"]) =>
@@ -2648,15 +2647,28 @@ function ReportsPanel({
                   : r.verificationStatus === "confirmed" ||
                       r.verificationStatus === "approved"
                     ? "Confirmed and protecting routes"
+                    : r.verificationStatus === "review_required"
+                      ? "Sent to a human safety reviewer"
+                    : r.verificationStatus === "uploading"
+                      ? "Photo upload did not finish"
                     : pending(r.verificationStatus)
                       ? "Verification in progress"
                       : "Not added to the map"}
               </strong>
               <p>
-                {pending(r.verificationStatus)
-                  ? "Your evidence is safely queued. You can close Pawlytics."
+                {r.verificationStatus === "automated_review"
+                  ? "AI is checking the dog, scene, time, location evidence, and duplicates. You can close Pawlytics."
+                  : r.verificationStatus === "review_required"
+                    ? "Automated checks finished, but a person must make the final decision."
+                    : r.verificationStatus === "uploading"
+                      ? "The evidence is not queued. Submit a new report; incomplete uploads expire automatically."
+                  : pending(r.verificationStatus)
+                    ? "Your evidence is safely queued. You can close Pawlytics."
                   : r.aiReason || r.aiSummary || r.description}
               </p>
+              <div className="verification-timeline" aria-label="Verification progress">
+                <i className="done"/><i className={r.verificationStatus==='uploading'?'':'done'}/><i className={['provisional','confirmed','approved','review_required','rejected','duplicate'].includes(r.verificationStatus)?'done':r.verificationStatus==='automated_review'?'active':''}/><i className={protecting(r.verificationStatus)||['rejected','duplicate'].includes(r.verificationStatus)?'done':r.verificationStatus==='review_required'?'active':''}/>
+              </div>
               <small>
                 {sightingDate(r.createdAt).toLocaleString()} ·{" "}
                 {r.lat?.toFixed(4)}, {r.lng?.toFixed(4)}
