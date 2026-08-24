@@ -1170,6 +1170,8 @@ function ReviewPanel({
 }) {
   const [reason, setReason] = useState(""),
     [busy, setBusy] = useState(false);
+  const [evidenceUrl,setEvidenceUrl]=useState(""),[evidenceError,setEvidenceError]=useState("");
+  useEffect(()=>{let active=true;void httpsCallable(functions,"getReportEvidenceUrl")({organizationId,reportId:report.id}).then(result=>{if(active)setEvidenceUrl((result.data as {url:string}).url)}).catch(()=>{if(active)setEvidenceError("Evidence image could not be loaded.")});return()=>{active=false}},[organizationId,report.id]);
   async function decide(decision: "confirmed" | "rejected" | "duplicate") {
     if (reason.trim().length < 5)
       return onStatus("Add a clear decision reason.");
@@ -1196,11 +1198,16 @@ function ReviewPanel({
         {report.verificationStatus}
       </span>
       <h2>Review report {report.id.slice(0, 8)}</h2>
+      <div className="review-evidence">{evidenceUrl?<img src={evidenceUrl} alt="Original report evidence"/>:<div>{evidenceError||"Loading original evidence…"}</div>}</div>
       <p>{report.description}</p>
       <dl>
         <div>
           <dt>AI summary</dt>
           <dd>{report.aiSummary || "Unavailable"}</dd>
+        </div>
+        <div>
+          <dt>AI reason</dt>
+          <dd>{report.aiReason || "Unavailable"}</dd>
         </div>
         <div>
           <dt>AI confidence</dt>
@@ -1211,8 +1218,28 @@ function ReviewPanel({
           </dd>
         </div>
         <div>
+          <dt>Detected dogs</dt>
+          <dd>{report.dogCount ?? "Unavailable"}</dd>
+        </div>
+        <div>
+          <dt>Reported / detected severity</dt>
+          <dd>{report.severity} / {report.observedSeverity || "unavailable"}</dd>
+        </div>
+        <div>
+          <dt>Detected behaviour</dt>
+          <dd>{report.observedBehavior || "Unavailable"}</dd>
+        </div>
+        <div>
           <dt>Location evidence</dt>
-          <dd>{report.locationEvidence || "Pending"}</dd>
+          <dd>{report.locationEvidence || "Pending"}{report.photoDistanceMetres != null ? ` · ${Math.round(report.photoDistanceMetres)} m from report` : ""}</dd>
+        </div>
+        <div>
+          <dt>Time evidence</dt>
+          <dd>{report.timeEvidence || "Pending"}{report.photoCapturedAt ? ` · ${sightingDate(report.photoCapturedAt).toLocaleString()}` : ""}</dd>
+        </div>
+        <div>
+          <dt>Source / manipulation check</dt>
+          <dd>{report.photoSource || "unknown"} · {report.manipulationLikely ? "possible manipulation" : "no manipulation detected"}</dd>
         </div>
         <div>
           <dt>Coordinates</dt>
@@ -1223,6 +1250,10 @@ function ReviewPanel({
         <div>
           <dt>Reward</dt>
           <dd>{report.rewardStatus || "ineligible"}</dd>
+        </div>
+        <div>
+          <dt>Pipeline decision</dt>
+          <dd>{report.decisionSource?.replace(/_/g," ") || report.processingStatus || "pending"}{report.evidenceQuality ? ` · ${report.evidenceQuality} evidence` : ""}</dd>
         </div>
       </dl>
       <label>
