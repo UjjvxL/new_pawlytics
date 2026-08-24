@@ -219,13 +219,13 @@ export default function App() {
     {!import.meta.env.VITE_GOOGLE_MAPS_API_KEY && <div className="setup-state"><div className="brand-mark">P</div><h1>Welcome to Pawlytics</h1><p>Add your API keys to <code>.env</code> to load the live map.</p></div>}
 
     <header className="topbar">
-      <div className="brand"><div className="brand-mark">P</div><span>Pawlytics</span></div>
+      <div className="brand" aria-label="Pawlytics"><div className="brand-mark">P</div></div>
+      <button className="search-bar" onClick={() => setRouteOpen(true)}><Search size={20}/><span>Where to?</span></button>
       {user ? <div className="profile-actions"><button className="notification-button" onClick={()=>setNotificationsOpen(v=>!v)} aria-label="Report notifications"><Bell size={20}/>{myReports.some(r=>r.verificationStatus==='pending')&&<i/>}</button><button className="avatar-button" onClick={() => signOut(auth)} title="Sign out">{user.photoURL ? <img src={user.photoURL} /> : <LogOut size={18} />}</button></div> : <button className="login-button" onClick={login}>Sign in</button>}
     </header>
     {notificationsOpen && user && <ReportsPanel reports={myReports} close={()=>setNotificationsOpen(false)}/>}
     {!online && <div className="offline-chip"><WifiOff size={14}/>Offline · saved map shell only</div>}
 
-    <button className="search-bar" onClick={() => setRouteOpen(true)}><Search size={20}/><span>Where do you want to go?</span></button>
     <div className="map-actions"><button className={following && location ? 'following' : ''} onClick={() => locate()} aria-label="My location"><Crosshair size={21}/></button></div>
     {locationState !== 'tracking' && <div className={`location-status ${locationState}`}><span className="location-spinner"/><div><strong>{locationState === 'finding' ? 'Finding your location…' : locationState === 'denied' ? 'Location permission blocked' : 'GPS unavailable'}</strong><small>{locationState === 'denied' ? 'Allow location in browser settings, then tap the target.' : locationState === 'unavailable' ? 'Turn on device location services.' : 'For accurate routes and reports'}</small></div></div>}
     <div className="risk-chip"><ShieldCheck size={17}/><strong>{activeRisk.length}</strong> active sighting{activeRisk.length === 1 ? '' : 's'} nearby</div>
