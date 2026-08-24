@@ -1,0 +1,13 @@
+node_modules
+dist
+.env
+.env.local
+functions/.secret.local
+functions/.gemini-secret
+functions/lib
+functions/node_modules
+.firebase
+firebase-debug.log
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts

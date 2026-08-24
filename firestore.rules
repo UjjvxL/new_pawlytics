@@ -1,0 +1,11 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /sightings/{id} {
+      allow read: if resource.data.verificationStatus == 'approved' || (request.auth != null && resource.data.reporterId == request.auth.uid);
+      allow create: if request.auth != null && request.resource.data.reporterId == request.auth.uid && request.resource.data.verificationStatus == 'pending';
+      allow update: if request.auth != null && resource.data.reporterId == request.auth.uid && resource.data.verificationStatus == 'pending' && request.resource.data.verificationStatus == 'pending' && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['imageUrl','processingStatus']);
+      allow delete: if false;
+    }
+  }
+}
