@@ -1,5 +1,15 @@
 import type { Sighting } from "./types";
 
+export interface DemoReviewCase {
+  id: string;
+  reportId: string;
+  organizationId: string;
+  priority: "high" | "medium" | "low";
+  status: "open" | "approved" | "rejected";
+  reasonCodes: string[];
+  createdAt: Date;
+}
+
 export const DEFAULT_DEMO_SIGHTINGS: Sighting[] = [
   {
     id: "demo-kp2-1",
@@ -12,10 +22,11 @@ export const DEFAULT_DEMO_SIGHTINGS: Sighting[] = [
     imageUrl: "https://images.unsplash.com/photo-1548199973-03cce0bbc87b?auto=format&fit=crop&w=800&q=80",
     thumbnailUrl: "https://images.unsplash.com/photo-1548199973-03cce0bbc87b?auto=format&fit=crop&w=300&q=80",
     createdAt: new Date(Date.now() - 3600000 * 2),
-    verificationStatus: "confirmed",
+    verificationStatus: "review_required",
     observedBehavior: "Aggressive growling pack near campus gate",
     aiConfidence: 0.94,
     privacySafeForPublic: true,
+    sharePublicImage: true,
   },
   {
     id: "demo-kp3-2",
@@ -28,10 +39,11 @@ export const DEFAULT_DEMO_SIGHTINGS: Sighting[] = [
     imageUrl: "https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?auto=format&fit=crop&w=800&q=80",
     thumbnailUrl: "https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?auto=format&fit=crop&w=300&q=80",
     createdAt: new Date(Date.now() - 3600000 * 5),
-    verificationStatus: "confirmed",
+    verificationStatus: "review_required",
     observedBehavior: "Resting near hospital food stalls",
     aiConfidence: 0.91,
     privacySafeForPublic: true,
+    sharePublicImage: true,
   },
   {
     id: "demo-alpha1-3",
@@ -44,15 +56,16 @@ export const DEFAULT_DEMO_SIGHTINGS: Sighting[] = [
     imageUrl: "https://images.unsplash.com/photo-1537151608828-ea2b11777ee8?auto=format&fit=crop&w=800&q=80",
     thumbnailUrl: "https://images.unsplash.com/photo-1537151608828-ea2b11777ee8?auto=format&fit=crop&w=300&q=80",
     createdAt: new Date(Date.now() - 3600000 * 12),
-    verificationStatus: "confirmed",
+    verificationStatus: "provisional",
     observedBehavior: "Vehicle chase behavior",
     aiConfidence: 0.88,
     privacySafeForPublic: true,
+    sharePublicImage: true,
   },
   {
     id: "demo-stjoseph-4",
-    lat: 28.4722,
-    lng: 77.5052,
+    lat: 28.4782,
+    lng: 77.5082,
     sightingTimezone: "Asia/Kolkata",
     description: "Group of 3 stray dogs resting peacefully near St. Joseph's School gate.",
     severity: "low",
@@ -67,7 +80,7 @@ export const DEFAULT_DEMO_SIGHTINGS: Sighting[] = [
   },
   {
     id: "demo-beta1-5",
-    lat: 28.4632,
+    lat: 28.4552,
     lng: 77.5142,
     sightingTimezone: "Asia/Kolkata",
     description: "Single stray dog followed evening walker for 150m in Beta 1 Block C.",
@@ -112,5 +125,60 @@ export const DEFAULT_DEMO_SIGHTINGS: Sighting[] = [
     observedBehavior: "Scavenging near food stalls",
     aiConfidence: 0.89,
     privacySafeForPublic: true,
+  },
+  {
+    id: "demo-parichowk-8",
+    lat: 28.467,
+    lng: 77.498,
+    sightingTimezone: "Asia/Kolkata",
+    description: "2 dogs near Pari Chowk round-about bus stop.",
+    severity: "medium",
+    dogCount: 2,
+    imageUrl: "https://images.unsplash.com/photo-1517849845537-4d257902454a?auto=format&fit=crop&w=800&q=80",
+    thumbnailUrl: "https://images.unsplash.com/photo-1517849845537-4d257902454a?auto=format&fit=crop&w=300&q=80",
+    createdAt: new Date(Date.now() - 3600000 * 8),
+    verificationStatus: "confirmed",
+    observedBehavior: "Loitering near transit point",
+    aiConfidence: 0.90,
+    privacySafeForPublic: true,
+  },
+];
+
+export const DEFAULT_DEMO_REVIEWS: DemoReviewCase[] = [
+  {
+    id: "rev-kp2-1",
+    reportId: "demo-kp2-1",
+    organizationId: "demo-org",
+    priority: "high",
+    status: "open",
+    reasonCodes: ["group_aggression", "campus_exit", "ai_high_confidence"],
+    createdAt: new Date(Date.now() - 3600000 * 2),
+  },
+  {
+    id: "rev-kp3-2",
+    reportId: "demo-kp3-2",
+    organizationId: "demo-org",
+    priority: "high",
+    status: "open",
+    reasonCodes: ["hospital_perimeter", "waste_point", "pack_sighting"],
+    createdAt: new Date(Date.now() - 3600000 * 5),
+  },
+  {
+    id: "rev-alpha1-3",
+    reportId: "demo-alpha1-3",
+    organizationId: "demo-org",
+    priority: "medium",
+    status: "open",
+    reasonCodes: ["scooter_chase", "metro_plaza"],
+    createdAt: new Date(Date.now() - 3600000 * 12),
+  },
+  {
+    id: "rev-beta1-5",
+    reportId: "demo-beta1-5",
+    organizationId: "demo-org",
+    priority: "low",
+    status: "open",
+    reasonCodes: ["pedestrian_following", "block_park"],
+    createdAt: new Date(Date.now() - 3600000 * 24),
   },
 ];

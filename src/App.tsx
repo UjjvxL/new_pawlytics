@@ -55,7 +55,7 @@ import {
 } from "./firebase";
 import type { Severity, Sighting, UserProfile } from "./types";
 import PawLogo from "./PawLogo";
-import { DEFAULT_DEMO_SIGHTINGS } from "./demoData";
+import { DEFAULT_DEMO_SIGHTINGS, DEFAULT_DEMO_REVIEWS } from "./demoData";
 
 const INDIA = { lat: 20.5937, lng: 78.9629 };
 const riskRadius: Record<Severity, number> = {
@@ -659,11 +659,10 @@ export default function App() {
       )}
 
       <header className="topbar">
-        <div className="brand" aria-label="Pawlytics">
-          <div className="brand-mark" title="Pawlytics">
+        <div className="brand" aria-label="Pawlytics" title="Pawlytics">
+          <div className="brand-mark">
             <PawLogo size={20} color="white" />
           </div>
-          <span style={{ fontWeight: 800, fontSize: "17px", color: "#1a2744" }}>Pawlytics</span>
         </div>
         <button className="search-bar" onClick={() => setRouteOpen(true)}>
           <Search size={20} />
@@ -983,7 +982,7 @@ function AuthorityPortal({
   const [tab, setTab] = useState<
     "overview" | "reviews" | "actions" | "team" | "settings"
   >("overview");
-  const [reviews, setReviews] = useState<any[]>([]),
+  const [reviews, setReviews] = useState<any[]>(DEFAULT_DEMO_REVIEWS),
     [actions, setActions] = useState<any[]>([]),
     [members, setMembers] = useState<any[]>([]);
   const [selectedReport, setSelectedReport] = useState<Sighting | null>(null),
@@ -1038,7 +1037,12 @@ function AuthorityPortal({
           collection(db, "reviewCases"),
           where("organizationId", "==", organizationId),
         ),
-        (s) => setReviews(s.docs.map((d) => ({ id: d.id, ...d.data() }))),
+        (s) =>
+          setReviews(
+            s.docs.length > 0
+              ? s.docs.map((d) => ({ id: d.id, ...d.data() }))
+              : DEFAULT_DEMO_REVIEWS,
+          ),
       ),
       onSnapshot(
         query(
@@ -1057,9 +1061,19 @@ function AuthorityPortal({
   async function openReview(reportId: string) {
     try {
       const snap = await getDoc(doc(db, "reports", reportId));
-      if (snap.exists())
+      if (snap.exists()) {
         setSelectedReport({ id: snap.id, ...snap.data() } as Sighting);
+        return;
+      }
     } catch {
+      // ignore
+    }
+    const match =
+      DEFAULT_DEMO_SIGHTINGS.find((s) => s.id === reportId) ||
+      sightings.find((s) => s.id === reportId);
+    if (match) {
+      setSelectedReport(match);
+    } else {
       setNotice("Report evidence could not be loaded.");
     }
   }
@@ -1115,7 +1129,9 @@ function AuthorityPortal({
     <main className="authority-shell">
       <aside>
         <a className="authority-brand" href="/">
-          <span>P</span>
+          <div className="brand-mark" style={{ width: 32, height: 32 }}>
+            <PawLogo size={18} color="white" />
+          </div>
           <div>
             <strong>Pawlytics</strong>
             <small>Authority Control Room</small>
@@ -1321,7 +1337,13 @@ function ReviewPanel({
         if (active) setEvidenceUrl((result.data as { url: string }).url);
       })
       .catch(() => {
-        if (active) setEvidenceError("Evidence image could not be loaded.");
+        if (active) {
+          if (report.imageUrl) {
+            setEvidenceUrl(report.imageUrl);
+          } else {
+            setEvidenceError("Evidence image could not be loaded.");
+          }
+        }
       });
     return () => {
       active = false;
