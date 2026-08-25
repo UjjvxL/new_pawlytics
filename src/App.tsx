@@ -33,6 +33,7 @@ import {
   CircleCheck,
   Crosshair,
   Download,
+  Dog,
   ExternalLink,
   HeartPulse,
   HandHeart,
@@ -157,6 +158,24 @@ function StatusNotice({
       <button onClick={close} aria-label="Dismiss notification">
         <X size={15} />
       </button>
+    </div>
+  );
+}
+
+function MapLoadingDog() {
+  return (
+    <div className="map-loading" role="status" aria-live="polite" aria-label="Preparing dog safety map">
+      <div className="map-loading-card">
+        <div className="loading-dog-scene" aria-hidden="true">
+          <span className="loading-paw p1"><PawLogo size={10} /></span>
+          <span className="loading-paw p2"><PawLogo size={8} /></span>
+          <span className="loading-dog"><Dog /></span>
+          <i className="loading-ground" />
+        </div>
+        <strong>Fetching the neighborhood pack…</strong>
+        <span>Preparing live sightings and safer routes</span>
+        <div className="loading-progress" aria-hidden="true"><i /></div>
+      </div>
     </div>
   );
 }
@@ -314,7 +333,10 @@ export default function App() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
   const [mapsReady, setMapsReady] = useState(false);
+  const [mapsFailed, setMapsFailed] = useState(false);
+  const [initialMapReady, setInitialMapReady] = useState(false);
   const [sightings, setSightings] = useState<Sighting[]>([]);
+  const [sightingsReady, setSightingsReady] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [routeOpen, setRouteOpen] = useState(false);
   const [selected, setSelected] = useState<Hotspot | null>(null);
@@ -489,10 +511,12 @@ export default function App() {
   useEffect(() => {
     if (demoMode) {
       setSightings(NCR_SCALE_DEMO_SIGHTINGS);
+      setSightingsReady(true);
       return;
     }
     if (!isFirebaseConfigured) {
       setSightings(DEFAULT_DEMO_SIGHTINGS);
+      setSightingsReady(true);
       return;
     }
     return onSnapshot(
@@ -504,9 +528,11 @@ export default function App() {
         setSightings(
           liveSightings.length > 0 ? liveSightings : DEFAULT_DEMO_SIGHTINGS,
         );
+        setSightingsReady(true);
       },
       () => {
         setSightings(DEFAULT_DEMO_SIGHTINGS);
+        setSightingsReady(true);
       },
     );
   }, [demoMode]);
@@ -539,11 +565,10 @@ export default function App() {
         });
         setMapsReady(true);
       })
-      .catch(() =>
-        setNotice(
-          "Google Maps failed to load. Check the API key and enabled APIs.",
-        ),
-      );
+      .catch(() => {
+        setMapsFailed(true);
+        setNotice("Google Maps failed to load. Check the API key and enabled APIs.");
+      });
   }, []);
 
   useEffect(() => {
@@ -615,7 +640,7 @@ export default function App() {
   }, [mapsReady]);
 
   useEffect(() => {
-    if (!mapsReady || !map.current) return;
+    if (!mapsReady || !map.current || !sightingsReady) return;
     const visibleSightings = (
       testMode ? [...sightings, ...manualSightings] : sightings
     ).filter((s) => (testMode || demoMode || !s.testOnly) && isActiveSighting(s));
@@ -669,6 +694,7 @@ export default function App() {
             clickable: false,
           });
         });
+        window.requestAnimationFrame(() => setInitialMapReady(true));
         return;
       }
       const bounds = map.current.getBounds();
@@ -707,6 +733,7 @@ export default function App() {
           zIndex: 1_000,
         });
       });
+      window.requestAnimationFrame(() => setInitialMapReady(true));
     };
     renderLayers();
     const idleListener = map.current.addListener("idle", renderLayers);
@@ -714,7 +741,7 @@ export default function App() {
       idleListener.remove();
       clearLayers();
     };
-  }, [mapsReady, sightings, testMode, demoMode, manualSightings]);
+  }, [mapsReady, sightingsReady, sightings, testMode, demoMode, manualSightings]);
 
   useEffect(() => {
     if (!mapsReady || !demoMode) return;
@@ -953,6 +980,9 @@ export default function App() {
   return (
     <main ref={appShell} className={`app-shell${demoMode ? " demo-shell" : ""}${fullscreen ? " immersive" : ""}`}>
       <div ref={mapNode} className="map" />
+      {import.meta.env.VITE_GOOGLE_MAPS_API_KEY && !initialMapReady && !mapsFailed && (
+        <MapLoadingDog />
+      )}
       {!import.meta.env.VITE_GOOGLE_MAPS_API_KEY && (
         <div className="setup-state">
           <div className="brand-mark" title="Pawlytics">

@@ -23,6 +23,19 @@ test("citizen map renders its primary controls without overflow", async ({
   );
 });
 
+test("map preparation has a themed loading state and clears after dog layers render", async ({ page }) => {
+  await page.route(/maps\.googleapis\.com\/maps\/api\/js/, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    await route.continue();
+  });
+  await page.goto("/demo", { waitUntil: "domcontentloaded" });
+  const loader = page.getByRole("status", { name: "Preparing dog safety map" });
+  await expect(loader).toBeVisible();
+  await expect(loader.getByText("Fetching the neighborhood pack…")).toBeVisible();
+  await expect(loader).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.locator(".map .gm-style")).toBeVisible();
+});
+
 test("fullscreen map control is stacked above recenter and can be exited", async ({
   page,
 }, testInfo) => {
