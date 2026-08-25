@@ -35,6 +35,23 @@ test("test URL is isolated and exposes manual dog placement and safe-route toggl
   await expect(page.getByText("Safe route", { exact: true })).toBeVisible();
 });
 
+test("status feedback is themed, dismissible, and does not block map controls", async ({
+  page,
+}) => {
+  await page.goto("/test");
+  await page.locator(".demo-controls input[type=checkbox]").uncheck();
+  const notice = page.locator(".status-notice.warning");
+  await expect(notice).toBeVisible();
+  const appearance = await notice.evaluate((element) => ({
+    background: getComputedStyle(element).backgroundColor,
+    color: getComputedStyle(element).color,
+  }));
+  expect(appearance.background).not.toBe("rgb(23, 34, 31)");
+  expect(appearance.color).not.toBe("rgb(255, 255, 255)");
+  await notice.getByRole("button", { name: "Dismiss notification" }).click();
+  await expect(notice).toHaveCount(0);
+});
+
 test("NCR scale demo is isolated and exposes judge route presets", async ({
   page,
   request,

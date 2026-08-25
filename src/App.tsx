@@ -27,10 +27,12 @@ import {
   ArrowLeft,
   Bell,
   Camera,
+  CircleCheck,
   Crosshair,
   Download,
   ExternalLink,
   HeartPulse,
+  Info,
   LogOut,
   MapPin,
   Mic,
@@ -75,6 +77,53 @@ interface NavigationStep {
   distance: string;
   duration: string;
   end: google.maps.LatLngLiteral;
+}
+
+type NoticeTone = "success" | "info" | "warning" | "error";
+
+function noticeTone(message: string): NoticeTone {
+  if (
+    /failed|could not|unavailable|blocked|invalid|not found|error|too large|needed/i.test(
+      message,
+    )
+  )
+    return "error";
+  if (/danger|risk|alert|denied|still passes|review|required|off\b/i.test(message))
+    return "warning";
+  if (/selected|ready|saved|set\b|on\b|complete|success|signed in|avoided/i.test(message))
+    return "success";
+  return "info";
+}
+
+function StatusNotice({
+  message,
+  close,
+  inline = false,
+}: {
+  message: string;
+  close: () => void;
+  inline?: boolean;
+}) {
+  const tone = noticeTone(message);
+  const Icon =
+    tone === "success"
+      ? CircleCheck
+      : tone === "warning" || tone === "error"
+        ? AlertTriangle
+        : Info;
+  return (
+    <div
+      className={`status-notice ${tone}${inline ? " inline" : ""}`}
+      role={tone === "error" ? "alert" : "status"}
+      aria-live={tone === "error" ? "assertive" : "polite"}
+    >
+      <Icon size={18} />
+      <span>{message}</span>
+      <button onClick={close} aria-label="Dismiss notification">
+        <X size={15} />
+      </button>
+    </div>
+  );
 }
 interface NavigationInfo {
   duration: string;
@@ -256,6 +305,15 @@ export default function App() {
   const [originPlacementMode, setOriginPlacementMode] = useState(false);
   const [safeRouting, setSafeRouting] = useState(true);
   const [demoPanelOpen, setDemoPanelOpen] = useState(false);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timeout = window.setTimeout(
+      () => setNotice(""),
+      noticeTone(notice) === "error" ? 8_000 : 5_000,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [notice]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1053,12 +1111,7 @@ export default function App() {
       </nav>
 
       {notice && (
-        <div className="toast" role="status">
-          {notice}
-          <button onClick={() => setNotice("")}>
-            <X size={16} />
-          </button>
-        </div>
+        <StatusNotice message={notice} close={() => setNotice("")} />
       )}
       {routeOpen && (
         <RouteSheet
@@ -1328,12 +1381,11 @@ function AuthorityPortal({
           )}
         </header>
         {notice && (
-          <div className="authority-notice">
-            {notice}
-            <button onClick={() => setNotice("")}>
-              <X />
-            </button>
-          </div>
+          <StatusNotice
+            message={notice}
+            close={() => setNotice("")}
+            inline
+          />
         )}
         {tab === "overview" && (
           <div className="authority-overview">
