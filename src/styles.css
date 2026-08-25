@@ -355,6 +355,17 @@ textarea {
   gap: 10px;
   background: linear-gradient(0deg, #fff 75%, transparent);
 }
+/* In an installed/immersive app the map should continue behind the iPhone
+   Home Indicator. Keeping the browser-layout white gradient here looks like a
+   large blank strip even though the viewport itself is correctly filled. */
+.app-shell.immersive .bottom-actions {
+  background: transparent;
+}
+@media (display-mode: standalone), (display-mode: fullscreen) {
+  .bottom-actions {
+    background: transparent;
+  }
+}
 .bottom-actions button {
   height: 55px;
   border-radius: 17px;

@@ -32,6 +32,9 @@ test("fullscreen map control is stacked above recenter and can be exited", async
     return Math.abs(bounds.bottom - window.innerHeight) <= 1;
   });
   expect(shellFitsViewport).toBeTruthy();
+  await page.locator(".app-shell").evaluate((shell) => shell.classList.add("immersive"));
+  await expect(page.locator(".bottom-actions")).toHaveCSS("background-image", "none");
+  await page.locator(".app-shell").evaluate((shell) => shell.classList.remove("immersive"));
   const fullscreen = page.getByRole("button", { name: "Enter fullscreen" });
   const recenter = page.getByRole("button", { name: "My location" });
   const fullscreenBounds = await fullscreen.boundingBox();
