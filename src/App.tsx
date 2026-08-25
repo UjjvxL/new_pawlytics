@@ -468,43 +468,104 @@ export default function App() {
 
   useEffect(() => {
     if (!mapsReady || !map.current) return;
-    markers.current.forEach((m) => (m.map = null));
     const visibleSightings = (
       testMode ? [...sightings, ...manualSightings] : sightings
     ).filter((s) => (testMode || demoMode || !s.testOnly) && isActiveSighting(s));
     const hotspots = groupHotspots(visibleSightings);
-    riskCircles.current.forEach((c) => c.setMap(null));
-    riskCircles.current = hotspots.map(
-      (s) =>
+    const clearLayers = () => {
+      markers.current.forEach((marker) => (marker.map = null));
+      markers.current = [];
+      riskCircles.current.forEach((circle) => circle.setMap(null));
+      riskCircles.current = [];
+    };
+    const renderLayers = () => {
+      if (!map.current) return;
+      clearLayers();
+      const zoom = map.current.getZoom() || 5;
+      if (zoom < 14) {
+        const cellSize = zoom <= 9 ? 0.15 : zoom <= 11 ? 0.06 : 0.025;
+        const cells = new Map<
+          string,
+          { lat: number; lng: number; dogs: number; points: number }
+        >();
+        hotspots.forEach((hotspot) => {
+          const latCell = Math.round(hotspot.lat / cellSize);
+          const lngCell = Math.round(hotspot.lng / cellSize);
+          const key = `${latCell}:${lngCell}`;
+          const cell = cells.get(key) || {
+            lat: 0,
+            lng: 0,
+            dogs: 0,
+            points: 0,
+          };
+          cell.lat += hotspot.lat;
+          cell.lng += hotspot.lng;
+          cell.dogs += hotspot.totalDogs;
+          cell.points += 1;
+          cells.set(key, cell);
+        });
+        riskCircles.current = [...cells.values()].map((cell) => {
+          const concentration = Math.min(1, Math.log10(cell.dogs + 1) / 2.2);
+          return new google.maps.Circle({
+            map: map.current,
+            center: {
+              lat: cell.lat / cell.points,
+              lng: cell.lng / cell.points,
+            },
+            radius: cellSize * 111_000 * 0.62,
+            strokeColor: cell.dogs >= 35 ? "#b3261e" : "#e49b00",
+            strokeOpacity: 0.18 + concentration * 0.3,
+            strokeWeight: 1,
+            fillColor: cell.dogs >= 35 ? "#ea4335" : "#fbbc04",
+            fillOpacity: 0.12 + concentration * 0.38,
+            clickable: false,
+          });
+        });
+        return;
+      }
+      const bounds = map.current.getBounds();
+      if (!bounds) return;
+      const nearby = hotspots
+        .filter((hotspot) => bounds.contains({ lat: hotspot.lat, lng: hotspot.lng }))
+        .slice(0, 120);
+      riskCircles.current = nearby.map(
+        (hotspot) =>
         new google.maps.Circle({
           map: map.current,
-          center: { lat: s.lat, lng: s.lng },
+          center: { lat: hotspot.lat, lng: hotspot.lng },
           radius: 250,
-          strokeColor: s.severity === "high" ? "#d93025" : "#f29900",
+          strokeColor:
+            hotspot.severity === "high" ? "#d93025" : "#f29900",
           strokeOpacity: 0.8,
           strokeWeight: 2,
-          fillColor: s.severity === "high" ? "#ea4335" : "#fbbc04",
+          fillColor: hotspot.severity === "high" ? "#ea4335" : "#fbbc04",
           fillOpacity: 0.18,
           clickable: false,
         }),
-    );
-    markers.current = hotspots.map((s) => {
-      const pin = document.createElement("button");
-      pin.className = `dog-marker ${s.severity}`;
-      pin.innerHTML = `<span>🐕</span><b>${s.totalDogs}</b>`;
-      pin.setAttribute(
-        "aria-label",
-        `${s.totalDogs} dogs, ${s.severity} risk hotspot`,
       );
-      pin.onclick = () => setSelected(s);
-      const marker = new google.maps.marker.AdvancedMarkerElement({
-        map: map.current,
-        position: { lat: s.lat, lng: s.lng },
-        content: pin,
-        zIndex: 1_000,
+      markers.current = nearby.map((hotspot) => {
+        const pin = document.createElement("button");
+        pin.className = `dog-marker ${hotspot.severity}`;
+        pin.innerHTML = `<span>🐕</span><b>${hotspot.totalDogs}</b>`;
+        pin.setAttribute(
+          "aria-label",
+          `${hotspot.totalDogs} dogs, ${hotspot.severity} risk hotspot`,
+        );
+        pin.onclick = () => setSelected(hotspot);
+        return new google.maps.marker.AdvancedMarkerElement({
+          map: map.current,
+          position: { lat: hotspot.lat, lng: hotspot.lng },
+          content: pin,
+          zIndex: 1_000,
+        });
       });
-      return marker;
-    });
+    };
+    renderLayers();
+    const idleListener = map.current.addListener("idle", renderLayers);
+    return () => {
+      idleListener.remove();
+      clearLayers();
+    };
   }, [mapsReady, sightings, testMode, demoMode, manualSightings]);
 
   useEffect(() => {
@@ -806,6 +867,9 @@ export default function App() {
             />
             <i />
           </label>
+          <span className="density-key" title="Map display changes with zoom">
+            <i /> Density
+          </span>
         </section>
       )}
       {testMode && <div className="demo-chip">Manual route testing</div>}

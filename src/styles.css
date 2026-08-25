@@ -1087,6 +1087,21 @@ textarea {
   background: white;
   transition: transform 0.2s;
 }
+.density-key {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #687872;
+  font-size: 9px;
+  white-space: nowrap;
+}
+.density-key i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #fbbc04, #d93025);
+  box-shadow: 0 0 0 3px #fbbc0430;
+}
 .scale-demo-panel input:checked + i {
   background: #136f63;
 }

@@ -74,6 +74,30 @@ test("NCR judge route demonstrably avoids the seeded danger corridor", async ({
   ).toHaveAttribute("href", /google\.com\/maps\/dir\/\?.*waypoints=/);
 });
 
+test("NCR demo hides detailed dog markers when zoomed out", async ({
+  page,
+  context,
+}, testInfo) => {
+  test.skip(
+    testInfo.project.name !== "desktop-chrome",
+    "wheel zoom assertion uses the desktop map gesture",
+  );
+  await context.setGeolocation({ latitude: 28.4589, longitude: 77.4947 });
+  await page.goto("/demo");
+  await expect(page.locator(".dog-marker").first()).toBeVisible({
+    timeout: 20_000,
+  });
+  const map = await page.locator(".map").boundingBox();
+  if (!map) throw new Error("Map bounds unavailable");
+  await page.mouse.move(map.x + map.width / 2, map.y + map.height / 2);
+  for (let step = 0; step < 8; step += 1) {
+    await page.mouse.wheel(0, 1_000);
+    await page.waitForTimeout(120);
+  }
+  await expect(page.locator(".dog-marker")).toHaveCount(0);
+  await expect(page.getByText("Density", { exact: true })).toBeVisible();
+});
+
 test("Google map tiles and destination suggestions are operational", async ({
   page,
 }, testInfo) => {
