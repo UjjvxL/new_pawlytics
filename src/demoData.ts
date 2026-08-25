@@ -184,9 +184,11 @@ export const DEFAULT_DEMO_REVIEWS: DemoReviewCase[] = [
 ];
 
 const DEMO_IMAGES = [
-  "https://firebasestorage.googleapis.com/v0/b/pawlytics-506516.firebasestorage.app/o/publicEvidence%2F0b3f64bea0bc3e19833ef4881dd0f899%2Fthumbnail.jpg?alt=media",
-  "https://firebasestorage.googleapis.com/v0/b/pawlytics-506516.firebasestorage.app/o/publicEvidence%2Fb88bea047af0b63ca8220aa3c3659fa9%2Fthumbnail.jpg?alt=media",
-  "https://firebasestorage.googleapis.com/v0/b/pawlytics-506516.firebasestorage.app/o/publicEvidence%2Fedd9e1cded6aed3fa5b050e556cee81f%2Fthumbnail.jpg?alt=media",
+  "/demo/dogs/street-dog-1.webp",
+  "/demo/dogs/street-dog-2.webp",
+  "/demo/dogs/street-dog-3.webp",
+  "/demo/dogs/street-dog-4.webp",
+  "/demo/dogs/street-dog-5.webp",
 ];
 
 const NCR_DEMO_AREAS = [

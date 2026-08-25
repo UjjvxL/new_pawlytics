@@ -546,7 +546,7 @@ export default function App() {
       markers.current = nearby.map((hotspot) => {
         const pin = document.createElement("button");
         pin.className = `dog-marker ${hotspot.severity}`;
-        pin.innerHTML = `<span>🐕</span><b>${hotspot.totalDogs}</b>`;
+        pin.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6.5" cy="7" r="2.2"/><circle cx="11" cy="5.2" r="2.2"/><circle cx="15.7" cy="6.2" r="2.2"/><circle cx="18.4" cy="10.3" r="2.1"/><path d="M6.2 15.2c1.8-3.4 4-4.8 6.3-4.5 2.8.3 5.6 3.4 5.2 6.3-.3 2.1-2.1 3-4.1 2.2-1.5-.6-2.5-.5-4 .1-2.1.8-4-.3-4.1-2.3 0-.6.2-1.2.7-1.8Z"/></svg>${hotspot.totalDogs > 1 ? `<b>${hotspot.totalDogs}</b>` : ""}`;
         pin.setAttribute(
           "aria-label",
           `${hotspot.totalDogs} dogs, ${hotspot.severity} risk hotspot`,

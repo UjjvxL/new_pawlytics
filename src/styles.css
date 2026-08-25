@@ -340,27 +340,33 @@ textarea {
   place-items: center;
 }
 .dog-marker {
-  border: 3px solid #fff;
-  border-radius: 50% 50% 50% 10%;
-  transform: rotate(-45deg);
-  width: 40px;
-  height: 40px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 2px solid #f29900;
+  border-radius: 50%;
+  background: #fff;
   display: grid;
   place-items: center;
-  box-shadow: 0 3px 8px #0004;
+  color: #9a6500;
+  box-shadow: 0 1px 4px #2021244d;
 }
-.dog-marker span {
-  transform: rotate(45deg);
-  font-size: 20px;
+.dog-marker svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
 }
 .dog-marker.low {
-  background: #59b88b;
+  border-color: #46a678;
+  color: #267452;
 }
 .dog-marker.medium {
-  background: #f1a63b;
+  border-color: #f29900;
+  color: #9a6500;
 }
 .dog-marker.high {
-  background: #de4d47;
+  border-color: #d93025;
+  color: #b3261e;
 }
 .scrim {
   position: absolute;
@@ -1244,19 +1250,20 @@ textarea {
 }
 .dog-marker b {
   position: absolute;
-  right: -8px;
-  top: -8px;
-  min-width: 19px;
-  height: 19px;
-  padding: 0 4px;
-  border-radius: 10px;
-  background: #17221f;
+  right: -7px;
+  top: -6px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: #3c4043;
   color: white;
-  font-size: 10px;
+  font-size: 8px;
+  line-height: 15px;
   display: grid;
   place-items: center;
-  transform: rotate(45deg);
-  border: 2px solid white;
+  border: 1.5px solid white;
+  box-shadow: 0 1px 2px #20212440;
 }
 .hotspot-card {
   display: block;

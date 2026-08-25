@@ -37,6 +37,7 @@ test("test URL is isolated and exposes manual dog placement and safe-route toggl
 
 test("NCR scale demo is isolated and exposes judge route presets", async ({
   page,
+  request,
 }) => {
   await page.goto("/demo");
 
@@ -51,6 +52,11 @@ test("NCR scale demo is isolated and exposes judge route presets", async ({
   await expect(
     page.getByRole("button", { name: "Knowledge Park II Metro" }),
   ).toBeVisible();
+  for (let image = 1; image <= 5; image += 1) {
+    const response = await request.get(`/demo/dogs/street-dog-${image}.webp`);
+    expect(response.ok()).toBeTruthy();
+    expect(response.headers()["content-type"]).toContain("image/webp");
+  }
 });
 
 test("NCR judge route demonstrably avoids the seeded danger corridor", async ({
@@ -87,6 +93,15 @@ test("NCR demo hides detailed dog markers when zoomed out", async ({
   await expect(page.locator(".dog-marker").first()).toBeVisible({
     timeout: 20_000,
   });
+  const marker = await page.locator(".dog-marker").first().boundingBox();
+  expect(marker?.width).toBeLessThanOrEqual(30);
+  expect(marker?.height).toBeLessThanOrEqual(30);
+  await page.locator(".dog-marker").first().click({ force: true });
+  await expect(page.locator(".hotspot-card img")).toHaveAttribute(
+    "src",
+    /\/demo\/dogs\/street-dog-[1-5]\.webp/,
+  );
+  await page.locator(".hotspot-card .card-close").click();
   const map = await page.locator(".map").boundingBox();
   if (!map) throw new Error("Map bounds unavailable");
   await page.mouse.move(map.x + map.width / 2, map.y + map.height / 2);
