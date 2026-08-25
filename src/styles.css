@@ -2892,6 +2892,32 @@ textarea {
 .da-ai span,.da-drawer dt,.da-timeline span { font-size: 9px; }
 @media(max-width:520px){.da-main>header h1{font-size:23px}.da-kpis strong{font-size:20px}.da-kpis small{font-size:9px}.da-card h2,.da-card-title h2{font-size:14px}.da-sidebar nav button{font-size:12px}}
 
+/* Larger judge-demo type scale. */
+.da-sidebar nav button { font-size: 15px; }
+.da-ecosystem { font-size: 12px; line-height: 1.35; }
+.da-main > header h1 { font-size: 30px; }
+.da-main > header p { font-size: 14px; }
+.da-kpis small { font-size: 12px; }
+.da-kpis strong { font-size: 27px; }
+.da-kpis em { font-size: 11px; }
+.da-card h2,.da-card-title h2 { font-size: 18px; }
+.da-card > p,.da-card-title p { font-size: 12px; line-height: 1.4; }
+.da-card-title > span,.da-card-title > b { font-size: 11px; }
+.da-map-stat span,.da-map-legend,.map-label { font-size: 11px; }
+.da-incident-list strong,.da-team-list strong { font-size: 13px; }
+.da-incident-list span,.da-incident-list small,.da-team-list span,.da-team-list small { font-size: 11px; }
+.da-incident-list em,.da-incident-table em { font-size: 9px; }
+.da-district-table header,.da-incident-table header { font-size: 10px; }
+.da-district-table article,.da-incident-table > button,.da-district-table article > strong { font-size: 13px; }
+.da-incident-table small { font-size: 11px; }
+.da-metrics li,.da-alerts strong,.da-tag-grid strong { font-size: 12px; }
+.da-alerts span,.da-flow article small,.da-abc-pipeline small,.da-tag-grid span,.da-stock span,.da-stock small { font-size: 11px; }
+.da-network-list strong { font-size: 13px; }
+.da-network-list small,.da-network-list article > b,.da-network-list article > em,.da-network-list button { font-size: 11px; }
+.da-drawer > p,.da-ai strong,.da-drawer dd,.da-timeline strong { font-size: 13px; }
+.da-ai span,.da-drawer dt,.da-timeline span { font-size: 11px; }
+@media(max-width:520px){.da-main>header h1{font-size:26px}.da-main>header p{font-size:12px}.da-kpis strong{font-size:23px}.da-kpis small{font-size:10px}.da-kpis em{font-size:9px}.da-card h2,.da-card-title h2{font-size:16px}.da-card>p,.da-card-title p{font-size:11px}.da-sidebar nav button{font-size:13px}.da-incident-list strong,.da-team-list strong{font-size:12px}.da-incident-list span,.da-incident-list small,.da-team-list span,.da-team-list small{font-size:10px}}
+
 .verification-timeline {
   list-style: none;
   grid-template-columns: repeat(5, minmax(0, 1fr));
