@@ -2878,9 +2878,23 @@ function HotspotCard({
   close: () => void;
 }) {
   const [reportIndex, setReportIndex] = useState(0);
-  const report = hotspot.reports[reportIndex];
+  const reports = useMemo(
+    () =>
+      [...hotspot.reports].sort((a, b) => {
+        const aHasPhoto = Boolean(a.thumbnailUrl || a.imageUrl);
+        const bHasPhoto = Boolean(b.thumbnailUrl || b.imageUrl);
+        if (aHasPhoto !== bHasPhoto) return aHasPhoto ? -1 : 1;
+        return (
+          sightingDate(b.createdAt).getTime() -
+          sightingDate(a.createdAt).getTime()
+        );
+      }),
+    [hotspot.reports],
+  );
+  const report = reports[reportIndex] || reports[0];
+  const photoUrl = report.thumbnailUrl || report.imageUrl;
   const [imageFailed, setImageFailed] = useState(false);
-  useEffect(() => setImageFailed(false), [report.id]);
+  useEffect(() => setImageFailed(false), [report.id, photoUrl]);
   const ageMinutes = Math.max(
     0,
     Math.round((Date.now() - sightingDate(report.createdAt).getTime()) / 60000),
@@ -2921,28 +2935,34 @@ function HotspotCard({
           </span>
         </div>
       </header>
-      {hotspot.reports.length > 1 && (
+      {reports.length > 1 && (
         <div className="report-tabs">
-          {hotspot.reports.map((_, i) => (
+          {reports.map((item, i) => (
             <button
               className={i === reportIndex ? "active" : ""}
-              key={i}
+              key={item.id}
               onClick={() => setReportIndex(i)}
+              aria-label={`Show report ${i + 1}${item.thumbnailUrl || item.imageUrl ? " with photo" : ""}`}
             >
-              {i + 1}
+              {item.thumbnailUrl || item.imageUrl ? "📷" : i + 1}
             </button>
           ))}
         </div>
       )}
       <div className="report-detail">
-        {report.imageUrl && !imageFailed ? (
+        {photoUrl && !imageFailed ? (
           <img
-            src={report.imageUrl}
-            alt={`Verified dog report ${reportIndex + 1} of ${hotspot.reports.length}`}
+            src={photoUrl}
+            alt={`Verified dog report ${reportIndex + 1} of ${reports.length}`}
+            loading="eager"
+            decoding="async"
             onError={() => setImageFailed(true)}
           />
         ) : (
-          <div className="no-photo">🐕</div>
+          <div className="no-photo" aria-label="No public photo for this report">
+            <span>🐕</span>
+            <small>{imageFailed ? "Photo unavailable" : "No public photo"}</small>
+          </div>
         )}
         <div>
           <strong>
