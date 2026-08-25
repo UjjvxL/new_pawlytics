@@ -1181,7 +1181,7 @@ textarea {
   position: absolute;
   z-index: 2;
   top: max(64px, calc(env(safe-area-inset-top) + 52px));
-  left: 65px;
+  left: 12px;
   right: 58px;
   display: flex;
   gap: 5px;
@@ -1977,7 +1977,7 @@ textarea {
     right: 24px;
   }
   .care-filters {
-    left: 79px;
+    left: 24px;
     right: 70px;
   }
   .scale-demo-trigger {
