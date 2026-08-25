@@ -74,6 +74,8 @@ import CctvDemo from "./CctvDemo";
 import {
   DEFAULT_DEMO_SIGHTINGS,
   DEFAULT_DEMO_REVIEWS,
+  demoAccountProfile,
+  demoAccountReports,
   NCR_DEMO_DESTINATIONS,
   NCR_DEMO_STATS,
   NCR_SCALE_DEMO_SIGHTINGS,
@@ -969,6 +971,18 @@ export default function App() {
       ),
     [sightings, testMode, demoMode, manualSightings],
   );
+  const incentiveDemoProfile = useMemo(
+    () => (demoMode && user ? demoAccountProfile(user.email, user.uid) : null),
+    [demoMode, user],
+  );
+  const incentiveDemoReports = useMemo(
+    () => (demoMode && user ? demoAccountReports(user.email) : []),
+    [demoMode, user],
+  );
+  const presentedProfile = incentiveDemoProfile || profile;
+  const presentedReports = incentiveDemoProfile
+    ? [...incentiveDemoReports, ...myReports]
+    : myReports;
 
   if (window.location.pathname.startsWith("/demo/watch"))
     return <WatchDemo />;
@@ -1008,12 +1022,12 @@ export default function App() {
         {user ? (
           <div className="profile-actions">
             <button
-              className="notification-button"
+              className={incentiveDemoProfile ? "notification-button demo-rewards" : "notification-button"}
               onClick={() => setNotificationsOpen((v) => !v)}
               aria-label="Report notifications"
             >
               <Bell size={20} />
-              {myReports.some((r) =>
+              {presentedReports.some((r) =>
                 [
                   "uploading",
                   "uploaded",
@@ -1022,6 +1036,7 @@ export default function App() {
                   "pending",
                 ].includes(r.verificationStatus),
               ) && <i />}
+              {incentiveDemoProfile && <b aria-label="Demo reward points">+50</b>}
             </button>
             <button
               className="avatar-button"
@@ -1043,17 +1058,19 @@ export default function App() {
       </header>
       {notificationsOpen && user && (
         <ReportsPanel
-          reports={myReports}
+          reports={presentedReports}
+          profile={presentedProfile}
+          demo={Boolean(incentiveDemoProfile)}
           close={() => setNotificationsOpen(false)}
         />
       )}
-      {user && profile && !profile.onboardingComplete && (
+      {user && presentedProfile && !presentedProfile.onboardingComplete && (
         <OnboardingSheet user={user} close={() => {}} onStatus={setNotice} />
       )}
-      {user && profile && accountOpen && (
+      {user && presentedProfile && accountOpen && (
         <AccountSheet
           user={user}
-          profile={profile}
+          profile={presentedProfile}
           close={() => setAccountOpen(false)}
           onStatus={setNotice}
         />
@@ -3661,9 +3678,13 @@ function HotspotCard({
 
 function ReportsPanel({
   reports,
+  profile,
+  demo = false,
   close,
 }: {
   reports: Sighting[];
+  profile?: UserProfile | null;
+  demo?: boolean;
   close: () => void;
 }) {
   const approved = reports.filter((r) =>
@@ -3710,7 +3731,7 @@ function ReportsPanel({
     return { completed: 5, active: -1 };
   }
   return (
-    <section className="notification-panel reports-panel">
+    <section className={`notification-panel reports-panel${demo ? " incentive-demo" : ""}`}>
       <header>
         <div>
           <strong>My reports</strong>
@@ -3718,10 +3739,18 @@ function ReportsPanel({
             {reports.length} submitted · {approved} confirmed
           </small>
         </div>
+        {demo && <span className="demo-data-label">DEMO PROFILE</span>}
         <button onClick={close}>
           <X size={17} />
         </button>
       </header>
+      {profile && reports.some((report) => report.pointsAwarded) && (
+        <div className="report-impact-summary">
+          <div><Trophy /><strong>{profile.impactPoints}</strong><span>impact points</span></div>
+          <div><span className="report-streak">🔥</span><strong>{profile.currentStreak}</strong><span>day streak</span></div>
+          <div><ShieldCheck /><strong>{profile.confirmedReports}</strong><span>verified reports</span></div>
+        </div>
+      )}
       {reports.length === 0 ? (
         <p>No reports yet.</p>
       ) : (
@@ -3732,6 +3761,9 @@ function ReportsPanel({
               className={`status-dot ${protecting(r.verificationStatus) ? "approved" : r.verificationStatus}`}
             />
             <div>
+              {r.rewardStatus === "credited" && (
+                <span className="report-reward"><ShieldCheck size={11} /> VERIFIED · +{r.pointsAwarded || 0}</span>
+              )}
               <strong>
                 {r.verificationStatus === "provisional"
                   ? "Provisionally protecting routes"

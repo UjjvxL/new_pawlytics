@@ -1,4 +1,87 @@
-import type { Sighting } from "./types";
+import type { Sighting, UserProfile } from "./types";
+
+const DEMO_ACCOUNT_EMAILS = {
+  "nirmalnpatel54321@gmail.com": {
+    handle: "nirmal.guardian",
+    displayName: "Nirmal Patel",
+    trustTier: "trusted",
+    impactPoints: 180,
+    confirmedReports: 18,
+    currentStreak: 7,
+    imageOffset: 0,
+  },
+  "ujjvalxix19@gmail.com": {
+    handle: "ujjval.watches",
+    displayName: "Ujjval",
+    trustTier: "trusted",
+    impactPoints: 140,
+    confirmedReports: 14,
+    currentStreak: 5,
+    imageOffset: 2,
+  },
+} as const;
+
+export function demoAccountProfile(
+  email: string | null | undefined,
+  uid: string,
+): UserProfile | null {
+  const account = DEMO_ACCOUNT_EMAILS[String(email || "").toLowerCase() as keyof typeof DEMO_ACCOUNT_EMAILS];
+  if (!account) return null;
+  return {
+    uid,
+    handle: account.handle,
+    displayName: account.displayName,
+    language: "en",
+    trustTier: account.trustTier,
+    impactPoints: account.impactPoints,
+    confirmedReports: account.confirmedReports,
+    currentStreak: account.currentStreak,
+    phoneVerified: true,
+    communityVisible: true,
+    leaderboardVisible: true,
+    onboardingComplete: true,
+    contributionStatus: "active",
+  };
+}
+
+export function demoAccountReports(email: string | null | undefined): Sighting[] {
+  const account = DEMO_ACCOUNT_EMAILS[String(email || "").toLowerCase() as keyof typeof DEMO_ACCOUNT_EMAILS];
+  if (!account) return [];
+  const reports = [
+    ["Knowledge Park II metro entrance", 28.4644, 77.4895, 2, "calm", "Two community dogs resting beside the metro service lane."],
+    ["IILM University Gate 1", 28.4584, 77.4952, 1, "roaming", "One dog moving calmly between the campus gate and footpath."],
+    ["Pari Chowk bus stop", 28.4657, 77.5108, 3, "alert", "Three dogs visible near the bus stand without chase behavior."],
+    ["Alpha I commercial belt", 28.4724, 77.5102, 2, "resting", "Two dogs resting near a shaded shopfront away from traffic."],
+    ["Sharda Hospital approach", 28.4716, 77.4838, 1, "following", "One dog briefly following pedestrians near the hospital approach."],
+  ] as const;
+  return reports.map(([place, lat, lng, dogCount, behavior, summary], index) => ({
+    id: `incentive-demo-${account.handle}-${index + 1}`,
+    lat,
+    lng,
+    sightingTimezone: "Asia/Kolkata",
+    description: summary,
+    severity: behavior === "following" || behavior === "alert" ? "medium" : "low",
+    dogCount,
+    imageUrl: `/demo/dogs/street-dog-${((account.imageOffset + index) % 5) + 1}.webp`,
+    thumbnailUrl: `/demo/dogs/street-dog-${((account.imageOffset + index) % 5) + 1}.webp`,
+    createdAt: new Date(Date.now() - (index * 24 + 2) * 3_600_000),
+    verificationStatus: index % 2 ? "approved" : "confirmed",
+    processingStatus: "decision_complete",
+    observedBehavior: behavior,
+    aiSummary: `Accepted: ${summary} Landmark and original photo metadata match ${place}.`,
+    aiConfidence: 0.94 + (index % 3) * 0.01,
+    locationEvidence: "Verified GPS + landmark match",
+    timeEvidence: "recent",
+    evidenceQuality: "strong",
+    metadataLocationSource: "server_exif",
+    metadataTimeSource: "server_exif",
+    manipulationLikely: false,
+    privacySafeForPublic: true,
+    sharePublicImage: true,
+    rewardStatus: "credited",
+    pointsAwarded: 10,
+  }));
+}
 
 export interface DemoReviewCase {
   id: string;
