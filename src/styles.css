@@ -173,6 +173,37 @@ textarea {
   overflow: hidden;
   overscroll-behavior: none;
 }
+.install-scrim {
+  z-index: 20;
+  align-items: flex-end;
+  padding: 16px;
+}
+.install-sheet {
+  position: relative;
+  width: min(100%, 390px);
+  margin: 0 auto max(4px, env(safe-area-inset-bottom));
+  padding: 22px 18px 18px;
+  border-radius: 22px;
+  background: white;
+  box-shadow: 0 16px 50px #10251d4d;
+  color: #263c35;
+}
+.install-icon {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: #e8f5f0;
+  color: #136f63;
+}
+.install-sheet h2 { margin: 12px 30px 5px 0; font-size: 20px; }
+.install-sheet > p { margin: 0; color: #65756f; font-size: 13px; line-height: 1.45; }
+.install-sheet ol { list-style: none; display: grid; gap: 10px; margin: 17px 0; padding: 0; }
+.install-sheet li { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.install-sheet li > span { flex: 0 0 25px; height: 25px; display: grid; place-items: center; border-radius: 50%; background: #edf6f2; color: #136f63; font-weight: 850; }
+.install-sheet li div { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.install-done { width: 100%; height: 44px; border: 0; border-radius: 12px; background: #136f63; color: white; font-weight: 800; }
 .map {
   position: absolute;
   inset: 0;

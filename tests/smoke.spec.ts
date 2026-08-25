@@ -25,7 +25,7 @@ test("citizen map renders its primary controls without overflow", async ({
 
 test("fullscreen map control is stacked above recenter and can be exited", async ({
   page,
-}) => {
+}, testInfo) => {
   await page.goto("/test");
   const fullscreen = page.getByRole("button", { name: "Enter fullscreen" });
   const recenter = page.getByRole("button", { name: "My location" });
@@ -34,6 +34,13 @@ test("fullscreen map control is stacked above recenter and can be exited", async
   if (!fullscreenBounds || !recenterBounds) throw new Error("Map action bounds unavailable");
   expect(fullscreenBounds.y + fullscreenBounds.height).toBeLessThan(recenterBounds.y);
   await fullscreen.click();
+  if (testInfo.project.name === "ios-sized-chrome") {
+    await expect(page.getByRole("heading", { name: "Use Pawlytics full screen" })).toBeVisible();
+    await expect(page.getByText("Add to Home Screen", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Got it" }).click();
+    await expect(page.getByRole("heading", { name: "Use Pawlytics full screen" })).toHaveCount(0);
+    return;
+  }
   await expect(page.getByRole("button", { name: "Exit fullscreen" })).toBeVisible();
   await page.getByRole("button", { name: "Exit fullscreen" }).click();
   await expect(page.getByRole("button", { name: "Enter fullscreen" })).toBeVisible();

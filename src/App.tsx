@@ -318,6 +318,7 @@ export default function App() {
   >("finding");
   const [following, setFollowing] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
+  const [installHelpOpen, setInstallHelpOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [myReports, setMyReports] = useState<Sighting[]>([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -359,6 +360,15 @@ export default function App() {
   async function toggleFullscreen() {
     const root = appShell.current;
     if (!root) return;
+    const standalone =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+    const isiPhoneBrowser =
+      /iPhone|iPod/.test(navigator.userAgent) && !standalone;
+    if (isiPhoneBrowser) {
+      setInstallHelpOpen(true);
+      return;
+    }
     if (fullscreen) {
       document.documentElement.classList.remove("immersive-fallback");
       if (document.fullscreenElement)
@@ -1007,6 +1017,25 @@ export default function App() {
         <div className="offline-chip">
           <WifiOff size={14} />
           Offline · saved map shell only
+        </div>
+      )}
+
+      {installHelpOpen && (
+        <div className="scrim install-scrim" onClick={() => setInstallHelpOpen(false)}>
+          <section className="install-sheet" onClick={(event) => event.stopPropagation()}>
+            <button className="card-close" onClick={() => setInstallHelpOpen(false)} aria-label="Close fullscreen instructions">
+              <X size={18} />
+            </button>
+            <div className="install-icon"><Maximize2 size={24} /></div>
+            <h2>Use Pawlytics full screen</h2>
+            <p>Apple only allows true app fullscreen when a website is opened from the Home Screen.</p>
+            <ol>
+              <li><span>1</span><div>Tap the <strong>Share</strong> button <Share2 size={15} /> in Safari or Chrome.</div></li>
+              <li><span>2</span><div>Choose <strong>Add to Home Screen</strong>.</div></li>
+              <li><span>3</span><div>Open <strong>Pawlytics</strong> from its new Home Screen icon.</div></li>
+            </ol>
+            <button className="install-done" onClick={() => setInstallHelpOpen(false)}>Got it</button>
+          </section>
         </div>
       )}
 
