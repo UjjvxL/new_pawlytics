@@ -1068,9 +1068,7 @@ function AuthorityPortal({
     } catch {
       // ignore
     }
-    const match =
-      DEFAULT_DEMO_SIGHTINGS.find((s) => s.id === reportId) ||
-      sightings.find((s) => s.id === reportId);
+    const match = DEFAULT_DEMO_SIGHTINGS.find((s) => s.id === reportId);
     if (match) {
       setSelectedReport(match);
     } else {
