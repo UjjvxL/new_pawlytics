@@ -23,6 +23,22 @@ test("citizen map renders its primary controls without overflow", async ({
   );
 });
 
+test("fullscreen map control is stacked above recenter and can be exited", async ({
+  page,
+}) => {
+  await page.goto("/test");
+  const fullscreen = page.getByRole("button", { name: "Enter fullscreen" });
+  const recenter = page.getByRole("button", { name: "My location" });
+  const fullscreenBounds = await fullscreen.boundingBox();
+  const recenterBounds = await recenter.boundingBox();
+  if (!fullscreenBounds || !recenterBounds) throw new Error("Map action bounds unavailable");
+  expect(fullscreenBounds.y + fullscreenBounds.height).toBeLessThan(recenterBounds.y);
+  await fullscreen.click();
+  await expect(page.getByRole("button", { name: "Exit fullscreen" })).toBeVisible();
+  await page.getByRole("button", { name: "Exit fullscreen" }).click();
+  await expect(page.getByRole("button", { name: "Enter fullscreen" })).toBeVisible();
+});
+
 test("test URL is isolated and exposes manual dog placement and safe-route toggle", async ({
   page,
 }) => {

@@ -38,7 +38,9 @@ import {
   Info,
   LogOut,
   MapPin,
+  Maximize2,
   Mic,
+  Minimize2,
   Navigation,
   Plus,
   Search,
@@ -287,6 +289,7 @@ function routeRisk(route: google.maps.DirectionsRoute, sightings: Sighting[]) {
 }
 
 export default function App() {
+  const appShell = useRef<HTMLElement>(null);
   const mapNode = useRef<HTMLDivElement>(null);
   const map = useRef<google.maps.Map>();
   const renderer = useRef<google.maps.DirectionsRenderer>();
@@ -314,6 +317,7 @@ export default function App() {
     "finding" | "tracking" | "denied" | "unavailable"
   >("finding");
   const [following, setFollowing] = useState(true);
+  const [fullscreen, setFullscreen] = useState(false);
   const [notice, setNotice] = useState("");
   const [myReports, setMyReports] = useState<Sighting[]>([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -341,6 +345,36 @@ export default function App() {
     lat: number;
     lng: number;
   } | null>(null);
+
+  useEffect(() => {
+    const syncFullscreen = () => {
+      if (document.fullscreenElement) setFullscreen(true);
+      else if (!document.documentElement.classList.contains("immersive-fallback"))
+        setFullscreen(false);
+    };
+    document.addEventListener("fullscreenchange", syncFullscreen);
+    return () => document.removeEventListener("fullscreenchange", syncFullscreen);
+  }, []);
+
+  async function toggleFullscreen() {
+    const root = appShell.current;
+    if (!root) return;
+    if (fullscreen) {
+      document.documentElement.classList.remove("immersive-fallback");
+      if (document.fullscreenElement)
+        await document.exitFullscreen().catch(() => undefined);
+      setFullscreen(false);
+      return;
+    }
+    try {
+      if (!root.requestFullscreen) throw new Error("Fullscreen API unavailable");
+      await root.requestFullscreen({ navigationUI: "hide" });
+      setFullscreen(true);
+    } catch {
+      document.documentElement.classList.add("immersive-fallback");
+      setFullscreen(true);
+    }
+  }
 
   useEffect(() => {
     if (!notice) return;
@@ -892,7 +926,7 @@ export default function App() {
     return <AuthorityPortal user={user} profile={profile} login={login} />;
 
   return (
-    <main className={`app-shell${demoMode ? " demo-shell" : ""}`}>
+    <main ref={appShell} className={`app-shell${demoMode ? " demo-shell" : ""}${fullscreen ? " immersive" : ""}`}>
       <div ref={mapNode} className="map" />
       {!import.meta.env.VITE_GOOGLE_MAPS_API_KEY && (
         <div className="setup-state">
@@ -977,6 +1011,14 @@ export default function App() {
       )}
 
       <div className="map-actions">
+        <button
+          className="fullscreen-button"
+          onClick={toggleFullscreen}
+          aria-label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+          title={fullscreen ? "Exit fullscreen" : "Fullscreen map"}
+        >
+          {fullscreen ? <Minimize2 size={19} /> : <Maximize2 size={19} />}
+        </button>
         <button
           className={following && location ? "following" : ""}
           onClick={() => locate()}
