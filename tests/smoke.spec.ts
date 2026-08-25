@@ -41,7 +41,7 @@ test("NCR scale demo is isolated and exposes judge route presets", async ({
   await page.goto("/demo");
 
   await expect(page.getByText("LIVE NCR SCALE DEMO")).toBeVisible();
-  await expect(page.getByText(/1,200.*demo dogs/)).toBeVisible();
+  await expect(page.getByText(/480.*demo dogs/)).toBeVisible();
   await expect(page.getByText("Safe path", { exact: true })).toBeVisible();
   await expect(page.getByText("Manual route testing")).toHaveCount(0);
   await page.getByRole("button", { name: "Where to?" }).click();

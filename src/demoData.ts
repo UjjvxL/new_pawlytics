@@ -220,6 +220,7 @@ const JUDGE_ROUTE = {
   start: { lat: 28.4589, lng: 77.4947 },
   end: { lat: 28.4657, lng: 77.5108 },
 };
+const HOTSPOTS_PER_AREA = 6;
 
 function distanceFromJudgeCorridor(lat: number, lng: number) {
   const { start, end } = JUDGE_ROUTE;
@@ -246,9 +247,9 @@ function distanceFromJudgeCorridor(lat: number, lng: number) {
  */
 export const NCR_SCALE_DEMO_SIGHTINGS: Sighting[] = NCR_DEMO_AREAS.flatMap(
   ([area, areaLat, areaLng], areaIndex) =>
-    Array.from({ length: 15 }, (_, hotspotIndex) => {
-      const row = Math.floor(hotspotIndex / 5) - 1;
-      const column = (hotspotIndex % 5) - 2;
+    Array.from({ length: HOTSPOTS_PER_AREA }, (_, hotspotIndex) => {
+      const row = Math.floor(hotspotIndex / 3) - 0.5;
+      const column = (hotspotIndex % 3) - 1;
       let lat = areaLat + row * 0.0049 + (areaIndex % 2) * 0.00035;
       let lng = areaLng + column * 0.0053 + (hotspotIndex % 2) * 0.00025;
       // Keep a single obvious obstruction on the IILM → Pari Chowk shortest
@@ -256,8 +257,11 @@ export const NCR_SCALE_DEMO_SIGHTINGS: Sighting[] = NCR_DEMO_AREAS.flatMap(
       if (areaIndex === 0 && hotspotIndex === 0) {
         lat = 28.45895;
         lng = 77.5027;
-      } else if (areaIndex < 8 && distanceFromJudgeCorridor(lat, lng) < 700) {
-        lat += hotspotIndex % 2 ? 0.009 : -0.009;
+      } else if (
+        areaIndex < 10 &&
+        distanceFromJudgeCorridor(lat, lng) < 1_500
+      ) {
+        lat += hotspotIndex % 2 ? 0.02 : -0.02;
       }
       const totalDogs = [3, 6, 4, 7][(areaIndex + hotspotIndex) % 4];
       const [behavior, detail] =
@@ -279,7 +283,9 @@ export const NCR_SCALE_DEMO_SIGHTINGS: Sighting[] = NCR_DEMO_AREAS.flatMap(
           thumbnailUrl: image,
           createdAt: new Date(
             Date.now() -
-              ((areaIndex * 15 + hotspotIndex) * 11 + reportIndex * 7 + 8) *
+              ((areaIndex * HOTSPOTS_PER_AREA + hotspotIndex) * 11 +
+                reportIndex * 7 +
+                8) *
                 60_000,
           ),
           expiresAt: new Date(Date.now() + 48 * 3_600_000),
@@ -298,7 +304,7 @@ export const NCR_SCALE_DEMO_SIGHTINGS: Sighting[] = NCR_DEMO_AREAS.flatMap(
 
 export const NCR_DEMO_STATS = {
   reports: NCR_SCALE_DEMO_SIGHTINGS.length,
-  hotspots: NCR_DEMO_AREAS.length * 15,
+  hotspots: NCR_DEMO_AREAS.length * HOTSPOTS_PER_AREA,
   dogs: NCR_SCALE_DEMO_SIGHTINGS.reduce(
     (total, report) => total + (report.dogCount || 1),
     0,
