@@ -451,6 +451,7 @@ export default function App() {
         map: map.current,
         position: { lat: s.lat, lng: s.lng },
         content: pin,
+        zIndex: 1_000,
       });
       return marker;
     });
@@ -1263,6 +1264,9 @@ function ReviewPanel({
 }) {
   const [reason, setReason] = useState(""),
     [busy, setBusy] = useState(false);
+  const [publishImage, setPublishImage] = useState(
+    Boolean(report.sharePublicImage && report.privacySafeForPublic),
+  );
   const [evidenceUrl, setEvidenceUrl] = useState(""),
     [evidenceError, setEvidenceError] = useState("");
   useEffect(() => {
@@ -1289,7 +1293,13 @@ function ReviewPanel({
       await httpsCallable(
         functions,
         "reviewReport",
-      )({ organizationId, reportId: report.id, decision, reason });
+      )({
+        organizationId,
+        reportId: report.id,
+        decision,
+        reason,
+        publishImage: decision === "confirmed" && publishImage,
+      });
       onStatus(`Report ${decision}.`);
       close();
     } catch {
@@ -1385,6 +1395,15 @@ function ReviewPanel({
           </dd>
         </div>
         <div>
+          <dt>Public image consent / AI privacy check</dt>
+          <dd>
+            {report.sharePublicImage ? "user consented" : "private only"} ·{" "}
+            {report.privacySafeForPublic
+              ? "AI found no obvious identifying detail"
+              : "AI privacy check not passed"}
+          </dd>
+        </div>
+        <div>
           <dt>Coordinates</dt>
           <dd>
             {report.lat.toFixed(5)}, {report.lng.toFixed(5)}
@@ -1414,6 +1433,21 @@ function ReviewPanel({
           onChange={(e) => setReason(e.target.value)}
           placeholder="Explain evidence and decision…"
         />
+      </label>
+      <label className="consent-row">
+        <input
+          type="checkbox"
+          checked={publishImage}
+          disabled={!report.sharePublicImage}
+          onChange={(event) => setPublishImage(event.target.checked)}
+        />
+        <span>
+          <strong>Publish sanitized carousel thumbnail</strong>
+          <small>
+            Available only when the reporter consented. Confirm there are no
+            identifiable people, plates, or private documents.
+          </small>
+        </span>
       </label>
       <div className="review-actions">
         <button disabled={busy} onClick={() => void decide("confirmed")}>
@@ -1771,8 +1805,8 @@ function OnboardingSheet({
             <span>
               <strong>I accept the Terms and Privacy Notice</strong>
               <small>
-                Photos and precise locations are private and used for
-                verification.
+                Originals and precise locations stay private. A metadata-free
+                thumbnail is shared only when you choose that on a report.
               </small>
             </span>
           </label>
@@ -2516,6 +2550,7 @@ function ReportSheet({
   const [photoSource, setPhotoSource] = useState<"camera" | "library">(
     "library",
   );
+  const [sharePublicImage, setSharePublicImage] = useState(true);
   const [preview, setPreview] = useState("");
   const [listening, setListening] = useState(false);
   const [speechLanguage, setSpeechLanguage] = useState(
@@ -2596,6 +2631,7 @@ function ReportSheet({
         description: description.trim(),
         severity,
         photoSource,
+        sharePublicImage,
         testMode,
         idempotencyKey,
       });
@@ -2803,6 +2839,21 @@ function ReportSheet({
                 : "Library photo: embedded Apple/EXIF GPS will be checked when available."}
             </p>
           )}
+          <label className="consent-row report-image-consent">
+            <input
+              type="checkbox"
+              checked={sharePublicImage}
+              onChange={(event) => setSharePublicImage(event.target.checked)}
+            />
+            <span>
+              <strong>Show this sighting photo on the map</strong>
+              <small>
+                If accepted and privacy-safe, Pawlytics publishes a resized copy
+                with GPS and device metadata removed. The original stays
+                private.
+              </small>
+            </span>
+          </label>
           <div className="location-confirm">
             <MapPin />
             <div>
@@ -2828,6 +2879,8 @@ function HotspotCard({
 }) {
   const [reportIndex, setReportIndex] = useState(0);
   const report = hotspot.reports[reportIndex];
+  const [imageFailed, setImageFailed] = useState(false);
+  useEffect(() => setImageFailed(false), [report.id]);
   const ageMinutes = Math.max(
     0,
     Math.round((Date.now() - sightingDate(report.createdAt).getTime()) / 60000),
@@ -2882,8 +2935,12 @@ function HotspotCard({
         </div>
       )}
       <div className="report-detail">
-        {report.imageUrl ? (
-          <img src={report.imageUrl} alt="Verified dog report" />
+        {report.imageUrl && !imageFailed ? (
+          <img
+            src={report.imageUrl}
+            alt={`Verified dog report ${reportIndex + 1} of ${hotspot.reports.length}`}
+            onError={() => setImageFailed(true)}
+          />
         ) : (
           <div className="no-photo">🐕</div>
         )}

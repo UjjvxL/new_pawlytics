@@ -277,8 +277,21 @@ async function runBrowserSubmission(
       "Decision",
     ]);
     assert.equal(await timeline.locator("i.done").count(), 5);
+    await page.locator(".notification-panel > header button").click();
+    const newestHotspot = page.locator(".dog-marker").first();
+    await newestHotspot.click({ force: true });
+    const carouselImage = page.locator(".hotspot-card img").first();
+    await carouselImage.waitFor({ timeout: 30_000 });
+    await page.waitForFunction(
+      () => {
+        const image = document.querySelector(".hotspot-card img");
+        return image instanceof HTMLImageElement && image.naturalWidth > 0;
+      },
+      undefined,
+      { timeout: 30_000 },
+    );
     process.stdout.write(
-      "BROWSER UI OK: login persistence, gallery upload, visible stages, bell progress, and final result\n",
+      "BROWSER UI OK: login persistence, gallery upload, visible stages, bell result, and map carousel image\n",
     );
     return reportId;
   } finally {
@@ -413,6 +426,7 @@ async function main() {
           description: "Admin-only concurrent report-session stress test",
           severity: "low",
           photoSource: "library",
+          sharePublicImage: true,
           testMode: true,
           idempotencyKey,
         }),
@@ -553,6 +567,18 @@ async function main() {
 
     const publicSighting = await getDocument(`publicSightings/${reportId}`);
     assert.equal(publicSighting?.testOnly, true);
+    assert.ok(
+      publicSighting?.imageUrl,
+      "Public sighting has no carousel image",
+    );
+    const publicImage = await fetch(publicSighting.imageUrl);
+    assert.equal(
+      publicImage.status,
+      200,
+      "Carousel image is not publicly readable",
+    );
+    assert.equal(publicImage.headers.get("content-type"), "image/jpeg");
+    createdObjects.add(`publicEvidence/${reportId}/thumbnail.jpg`);
     const evidence = await callable("getReportEvidenceUrl", {
       organizationId: report.organizationId || "",
       reportId,
@@ -598,6 +624,7 @@ async function main() {
       }
     }
     for (const reportId of createdReports) {
+      createdObjects.add(`publicEvidence/${reportId}/thumbnail.jpg`);
       const report = await getDocument(`reports/${reportId}`).catch(() => null);
       if (report?.storagePath) createdObjects.add(report.storagePath);
       await Promise.allSettled([

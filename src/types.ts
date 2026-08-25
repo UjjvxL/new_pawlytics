@@ -46,6 +46,8 @@ export interface Sighting {
   photoCapturedAt?: { toDate: () => Date } | Date;
   photoSource?: "camera" | "library";
   manipulationLikely?: boolean;
+  privacySafeForPublic?: boolean;
+  sharePublicImage?: boolean;
   decisionSource?:
     | "ai_only"
     | "ai_rejection"

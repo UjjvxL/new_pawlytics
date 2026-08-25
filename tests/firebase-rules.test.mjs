@@ -162,6 +162,21 @@ test("private evidence uploads require the report owner and a supported image ty
     ),
   );
   await assertFails(getBytes(ref(ownerStorage, path)));
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await uploadBytes(
+      ref(context.storage(), "publicEvidence/report-owner/thumbnail.jpg"),
+      jpeg,
+      { contentType: "image/jpeg" },
+    );
+  });
+  await assertSucceeds(
+    getBytes(
+      ref(
+        environment.unauthenticatedContext().storage(),
+        "publicEvidence/report-owner/thumbnail.jpg",
+      ),
+    ),
+  );
 });
 
 test("rules remain deterministic under repeated unauthorized access", async () => {
