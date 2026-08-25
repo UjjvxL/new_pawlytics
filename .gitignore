@@ -8,6 +8,10 @@ functions/lib
 functions/node_modules
 .firebase
 firebase-debug.log
+firestore-debug.log
+storage-debug.log
+test-results
+playwright-report
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts

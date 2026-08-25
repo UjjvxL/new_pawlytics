@@ -9,9 +9,14 @@
   "background_color": "#e9eeeb",
   "theme_color": "#136f63",
   "icons": [
-    { "src": "/pawlytics-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    {
+      "src": "/pawlytics-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
   ],
   "shortcuts": [
-    { "name": "Test safe routing", "short_name": "Route test", "url": "/?test=1" }
+    { "name": "Test safe routing", "short_name": "Route test", "url": "/test" }
   ]
 }

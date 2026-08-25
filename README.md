@@ -6,14 +6,15 @@ A mobile-first dog-sighting safety map. It supports Google login, verified commu
 
 - Google authentication through Firebase Auth
 - Google Maps with current location, destination suggestions, walking directions, alternative-route risk scoring, and exact-route handoff to Google Maps
-- Photo capture/upload, Web Speech API dictation, location and timestamp metadata
-- Server-side Gemini 3.6 Flash image/report verification; the API key never enters the browser
+- Camera and photo-library upload, Web Speech API dictation, and client/server normalization of iPhone, Android, EXIF, XMP, Apple GPS, orientation, and capture-time metadata
+- Server-confirmed upload stages (`created → image uploaded → metadata parsed → AI queued → decision`) with background progress in the notification bell
+- Server-side Gemini image/report verification with multiple model fallbacks; the API key never enters the browser
 - Firestore live updates and Cloud Storage images
 - Report lifecycle history with AI result details, map links, and downloadable receipts
-- Explainable 250 m yellow/red hotspot zones and a manual dog-placement route tester at `/?test=1`
+- Explainable 250 m yellow/red hotspot zones and a manual dog-placement/report tester at `/test`
 - WHO-aligned bite first aid and a location-aware Google Maps handoff for nearby rabies care
-- Installable PWA shell with offline status and cached app fallback
-- Rules that let signed-in users create pending reports but never approve their own reports
+- `/test` tools for placing dogs, toggling safe routing, and manually setting a route/report origin when insecure LAN HTTP cannot expose GPS
+- Firestore and Storage rules that keep raw reports/evidence private and prevent clients from creating or approving safety records directly
 
 ## 1. Create Firebase and get the frontend keys
 
@@ -27,12 +28,12 @@ Firebase web configuration is intentionally public and protected by Firebase rul
 ## 2. Get a Google Maps key
 
 1. In [Google Cloud Console](https://console.cloud.google.com/google/maps-apis/overview), select the same project and attach billing.
-2. Enable **Maps JavaScript API**, **Geocoding API**, and **Directions API**.
+2. Enable **Maps JavaScript API**, **Places API (New)**, **Geocoding API**, and **Directions API**.
 3. Open **APIs & Services → Credentials → Create credentials → API key**.
-4. Restrict it to website HTTP referrers (`http://localhost:5173/*` plus your production domain) and restrict API access to those three APIs.
+4. Restrict it to website HTTP referrers (`http://localhost:5173/*` plus your production domain) and restrict API access to those APIs.
 5. Put it in `.env` as `VITE_GOOGLE_MAPS_API_KEY`.
 
-The implementation uses Google's browser Directions service, which Google deprecated in February 2026 but continues to support. A production v2 should move routing to Routes API before removal is announced.
+The current browser route comparison uses `DirectionsService`; plan a controlled migration to Routes API after matching the alternative-route and Google Maps handoff behavior.
 
 ## 3. Get and securely store the Gemini key
 
@@ -46,7 +47,7 @@ firebase use --add
 firebase functions:secrets:set GEMINI_API_KEY
 ```
 
-Paste the key only when the final command prompts. The function uses multimodal `gemini-3.6-flash`.
+Paste the key only when the final command prompts. The function starts with `gemini-3.6-flash` and falls back across supported Flash models when a model is rate-limited. Enable billing and request suitable production quota; fallbacks are resilience, not extra guaranteed capacity.
 
 ## 4. Run and deploy
 
@@ -54,6 +55,28 @@ Paste the key only when the final command prompts. The function uses multimodal 
 npm install
 npm --prefix functions install
 npm run dev
+```
+
+For another device on the same network:
+
+```bash
+npm run dev -- --host 0.0.0.0
+```
+
+Plain LAN HTTP is not a secure browser context, so iOS/Android can withhold GPS and camera permissions. Use the deployed HTTPS URL for real device GPS/camera testing. On `/test`, **Set start** lets you tap a non-hardcoded test origin when using LAN HTTP.
+
+Run the complete local gate with:
+
+```bash
+npm test
+npm run build
+```
+
+The opt-in live smoke test creates isolated admin-only reports, exercises the real upload/metadata/Gemini/authority/browser flow, and removes its documents and images:
+
+```bash
+LIVE_SMOKE=1 npm run test:live
+npm run test:e2e:live
 ```
 
 Deploy after testing:
@@ -67,4 +90,4 @@ Geolocation and camera require HTTPS in production; localhost is allowed during 
 
 ## Safety notes before public launch
 
-Gemini verification is a moderation signal, not proof that a report is genuine or a route is safe. Add Firebase App Check, rate limits, duplicate-image detection, reporter reputation, abuse review, privacy/retention consent, and a human moderation queue before public use. Reports expire after 24 hours. Do not market routes as guaranteed safe.
+Gemini verification is a moderation signal, not proof that a report is genuine or a route is safe. Rate limits, duplicate detection, reporter trust, privacy controls, expiry, and human review are implemented. Before an open public launch, configure a reCAPTCHA Enterprise site key and enable Firebase App Check enforcement, raise Gemini production quota, add monitoring/alerts and backups, and complete legal/privacy review. Do not market routes as guaranteed safe.

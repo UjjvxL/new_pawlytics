@@ -4,7 +4,9 @@ import {
   collection,
   doc,
   getDoc,
+  limit,
   onSnapshot,
+  orderBy,
   query,
   where,
 } from "firebase/firestore";
@@ -45,6 +47,7 @@ import {
 } from "lucide-react";
 import {
   auth,
+  authReady,
   db,
   functions,
   isFirebaseConfigured,
@@ -89,6 +92,15 @@ interface Hotspot {
 function sightingDate(value: Sighting["createdAt"]) {
   if (!value) return new Date(0);
   return "toDate" in value ? value.toDate() : value;
+}
+
+function isActiveSighting(sighting: Sighting) {
+  if (!sighting.expiresAt) return true;
+  const expiresAt =
+    "toDate" in sighting.expiresAt
+      ? sighting.expiresAt.toDate()
+      : sighting.expiresAt;
+  return expiresAt > new Date();
 }
 
 function groupHotspots(reports: Sighting[]): Hotspot[] {
@@ -198,31 +210,61 @@ export default function App() {
   const [navigation, setNavigation] = useState<NavigationInfo | null>(null);
   const [navigationActive, setNavigationActive] = useState(false);
   const [stepsOpen, setStepsOpen] = useState(false);
-  const testMode = new URLSearchParams(window.location.search).has("test");
+  const testMode =
+    window.location.pathname === "/test" ||
+    new URLSearchParams(window.location.search).has("test");
   const [manualSightings, setManualSightings] = useState<Sighting[]>([]);
   const [placementMode, setPlacementMode] = useState(false);
+  const [originPlacementMode, setOriginPlacementMode] = useState(false);
   const [safeRouting, setSafeRouting] = useState(true);
 
   useEffect(() => {
-    getRedirectResult(auth).catch(() =>
-      setNotice("Google sign-in could not be completed. Please retry."),
-    );
+    let cancelled = false;
+    let stopAuth: undefined | (() => void);
     let stopProfile: undefined | (() => void);
-    return onAuthStateChanged(auth, (next) => {
-      stopProfile?.();
-      setUser(next);
-      setProfile(null);
-      if (!next) return;
-      void httpsCallable(
-        functions,
-        "bootstrapUser",
-      )({}).catch(() =>
-        setNotice("Your profile could not be initialized. Please retry."),
-      );
-      stopProfile = onSnapshot(doc(db, "users", next.uid), (snap) => {
-        if (snap.exists()) setProfile(snap.data() as UserProfile);
+    void authReady.then(async () => {
+      try {
+        await getRedirectResult(auth);
+      } catch (error) {
+        if (!cancelled) {
+          console.error("redirect-sign-in", error);
+          setNotice(
+            "Google sign-in could not be completed. Check that this domain is authorized and retry.",
+          );
+        }
+      }
+      if (cancelled) return;
+      stopAuth = onAuthStateChanged(auth, (next) => {
+        stopProfile?.();
+        setUser(next);
+        setProfile(null);
+        if (!next) return;
+        void httpsCallable(
+          functions,
+          "bootstrapUser",
+        )({}).catch((error) => {
+          console.error("profile-bootstrap", error);
+          setNotice(
+            "Signed in, but your profile could not be initialized. Tap the profile icon to retry.",
+          );
+        });
+        stopProfile = onSnapshot(
+          doc(db, "users", next.uid),
+          (snap) => {
+            if (snap.exists()) setProfile(snap.data() as UserProfile);
+          },
+          (error) => {
+            console.error("profile-listener", error);
+            setNotice("Signed in, but the profile database is unavailable.");
+          },
+        );
       });
     });
+    return () => {
+      cancelled = true;
+      stopAuth?.();
+      stopProfile?.();
+    };
   }, []);
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
@@ -239,7 +281,12 @@ export default function App() {
       return;
     }
     return onSnapshot(
-      query(collection(db, "reports"), where("reporterId", "==", user.uid)),
+      query(
+        collection(db, "reports"),
+        where("reporterId", "==", user.uid),
+        orderBy("createdAt", "desc"),
+        limit(20),
+      ),
       (snap) =>
         setMyReports(
           snap.docs
@@ -374,7 +421,7 @@ export default function App() {
     markers.current.forEach((m) => (m.map = null));
     const visibleSightings = (
       testMode ? [...sightings, ...manualSightings] : sightings
-    ).filter((s) => testMode || !s.testOnly);
+    ).filter((s) => (testMode || !s.testOnly) && isActiveSighting(s));
     const hotspots = groupHotspots(visibleSightings);
     riskCircles.current.forEach((c) => c.setMap(null));
     riskCircles.current = hotspots.map(
@@ -410,12 +457,44 @@ export default function App() {
   }, [mapsReady, sightings, testMode, manualSightings]);
 
   useEffect(() => {
-    if (!mapsReady || !map.current || !testMode || !placementMode) return;
+    if (
+      !mapsReady ||
+      !map.current ||
+      !testMode ||
+      (!placementMode && !originPlacementMode)
+    )
+      return;
     const listener = map.current.addListener(
       "click",
       (event: google.maps.MapMouseEvent) => {
         if (!event.latLng) return;
         const point = event.latLng.toJSON();
+        if (originPlacementMode) {
+          setLocation(point);
+          setLocationState("tracking");
+          setFollowing(true);
+          followingRef.current = true;
+          firstLocation.current = false;
+          if (!locationMarker.current) {
+            const dot = document.createElement("div");
+            dot.className = "user-location";
+            dot.setAttribute("aria-label", "Your test start location");
+            locationMarker.current =
+              new google.maps.marker.AdvancedMarkerElement({
+                map: map.current,
+                position: point,
+                content: dot,
+                zIndex: 999,
+              });
+          } else locationMarker.current.position = point;
+          setOriginPlacementMode(false);
+          renderer.current?.set("directions", null);
+          setNavigation(null);
+          setNotice(
+            "Test start location set. It will be used for routes and test reports.",
+          );
+          return;
+        }
         const placed: Sighting = {
           id: `manual-${Date.now()}`,
           ...point,
@@ -444,6 +523,7 @@ export default function App() {
     mapsReady,
     testMode,
     placementMode,
+    originPlacementMode,
     manualSightings,
     navigation,
     safeRouting,
@@ -489,12 +569,17 @@ export default function App() {
 
   async function login() {
     try {
+      await authReady;
       provider.setCustomParameters({ prompt: "select_account" });
       await signInWithPopup(auth, provider);
     } catch (err) {
       const code =
         typeof err === "object" && err && "code" in err ? String(err.code) : "";
-      if (code.includes("popup-blocked")) {
+      if (
+        code.includes("popup-blocked") ||
+        code.includes("operation-not-supported-in-this-environment") ||
+        code.includes("web-storage-unsupported")
+      ) {
         setNotice(
           "Popup was blocked. Continuing with secure redirect sign-in…",
         );
@@ -514,14 +599,7 @@ export default function App() {
   const activeRisk = useMemo(
     () =>
       (testMode ? [...sightings, ...manualSightings] : sightings).filter(
-        (s) =>
-          (testMode || !s.testOnly) &&
-          (() => {
-            if (!s.expiresAt) return true;
-            const date =
-              "toDate" in s.expiresAt ? s.expiresAt.toDate() : s.expiresAt;
-            return date > new Date();
-          })(),
+        (s) => (testMode || !s.testOnly) && isActiveSighting(s),
       ),
     [sightings, testMode, manualSightings],
   );
@@ -651,10 +729,23 @@ export default function App() {
           <strong>Route tester</strong>
           <button
             className={placementMode ? "placing" : ""}
-            onClick={() => setPlacementMode((v) => !v)}
+            onClick={() => {
+              setOriginPlacementMode(false);
+              setPlacementMode((v) => !v);
+            }}
           >
             <Plus size={16} />
             {placementMode ? "Tap map…" : "Place dog"}
+          </button>
+          <button
+            className={originPlacementMode ? "placing" : ""}
+            onClick={() => {
+              setPlacementMode(false);
+              setOriginPlacementMode((v) => !v);
+            }}
+          >
+            <Crosshair size={16} />
+            {originPlacementMode ? "Tap start…" : "Set start"}
           </button>
           <label>
             <span>Safe route</span>
@@ -817,6 +908,7 @@ export default function App() {
       )}
       {reportOpen && user && (
         <ReportSheet
+          testMode={testMode}
           initialLocation={location}
           locate={locate}
           close={() => setReportOpen(false)}
@@ -1275,7 +1367,18 @@ function ReviewPanel({
         <div>
           <dt>Source / manipulation check</dt>
           <dd>
-            {report.photoSource || "unknown"} ·{" "}
+            {report.photoSource || "unknown"} · metadata: location{" "}
+            {(
+              report.metadataLocationSource ||
+              report.metadataSource ||
+              "none"
+            ).replace(/_/g, " ")}
+            {" · "}time{" "}
+            {(report.metadataTimeSource || "none").replace(/_/g, " ")} ·{" "}
+            {report.metadataMake || report.metadataModel
+              ? `${report.metadataMake || ""} ${report.metadataModel || ""}`.trim()
+              : "device unknown"}{" "}
+            ·{" "}
             {report.manipulationLikely
               ? "possible manipulation"
               : "no manipulation detected"}
@@ -1300,6 +1403,7 @@ function ReviewPanel({
             {report.evidenceQuality
               ? ` · ${report.evidenceQuality} evidence`
               : ""}
+            {report.aiModel ? ` · ${report.aiModel}` : ""}
           </dd>
         </div>
       </dl>
@@ -1473,7 +1577,7 @@ function TeamPanel({
               <td>{m.email || m.id}</td>
               <td>{m.role}</td>
               <td>{m.status}</td>
-              <td>{m.mfaRequired ? "Required" : "—"}</td>
+              <td>{m.mfaRequired ? "Required" : "Not enabled"}</td>
             </tr>
           ))}
         </tbody>
@@ -1699,26 +1803,41 @@ function AccountSheet({
   const [verificationId, setVerificationId] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
+  const phoneVerifier = useRef<RecaptchaVerifier | null>(null);
   const [communityVisible, setCommunityVisible] = useState(
     profile.communityVisible,
   );
   const [leaderboardVisible, setLeaderboardVisible] = useState(
     profile.leaderboardVisible,
   );
+  useEffect(() => () => phoneVerifier.current?.clear(), []);
   async function sendCode() {
     setBusy(true);
     try {
+      await authReady;
+      auth.languageCode = profile.language || navigator.language;
+      phoneVerifier.current?.clear();
       const verifier = new RecaptchaVerifier(auth, "phone-recaptcha", {
-        size: "invisible",
+        size: "normal",
+        "expired-callback": () =>
+          onStatus("Phone verification expired. Complete the check again."),
       });
+      phoneVerifier.current = verifier;
       const id = await new PhoneAuthProvider(auth).verifyPhoneNumber(
         phone.replace(/\s/g, ""),
         verifier,
       );
       setVerificationId(id);
       onStatus("Verification code sent.");
-    } catch {
-      onStatus("Could not send the code. Check the number and try again.");
+    } catch (error) {
+      console.error("phone-code", error);
+      const code =
+        typeof error === "object" && error && "code" in error
+          ? String(error.code).replace("auth/", "")
+          : "unknown-error";
+      onStatus(
+        `Could not send the code (${code}). Use an India or Canada number in full international format.`,
+      );
     } finally {
       setBusy(false);
     }
@@ -1867,7 +1986,8 @@ function AccountSheet({
           {profile.phoneVerified ? (
             <p className="verified-line">
               <ShieldCheck size={18} />
-              Phone verified · points and streaks enabled
+              Phone verified · reports with original recent GPS/time can earn
+              points
             </p>
           ) : (
             <>
@@ -2179,6 +2299,7 @@ function RouteSheet({
         .join("|");
       const mapsParams = new URLSearchParams({
         api: "1",
+        origin: `${origin.lat.toFixed(6)},${origin.lng.toFixed(6)}`,
         destination: leg.end_location.toUrlValue(6),
         travelmode: "walking",
         dir_action: "navigate",
@@ -2277,6 +2398,77 @@ function RouteSheet({
   );
 }
 
+interface ClientPhotoMetadata {
+  latitude?: number;
+  longitude?: number;
+  capturedAt?: string;
+  make?: string;
+  model?: string;
+  orientation?: number;
+  originalPreserved: boolean;
+  platform: string;
+}
+async function readClientPhotoMetadata(
+  file: File,
+): Promise<ClientPhotoMetadata> {
+  const platform = /iPhone|iPad|iPod/i.test(navigator.userAgent)
+      ? "ios"
+      : /Android/i.test(navigator.userAgent)
+        ? "android"
+        : "web",
+    base = { originalPreserved: file.size < 10_000_000, platform };
+  try {
+    const exifr = await import("exifr"),
+      [gps, full, orientation] = await Promise.all([
+        exifr.gps(file),
+        exifr.parse(file, {
+          gps: true,
+          exif: true,
+          tiff: true,
+          xmp: true,
+          reviveValues: true,
+        }),
+        exifr.orientation(file),
+      ]),
+      appleCoordinates = String(
+        full?.GPSCoordinates ||
+          full?.location ||
+          full?.Location ||
+          full?.["com.apple.quicktime.location.ISO6709"] ||
+          "",
+      ).match(/^([+-]\d+(?:\.\d+)?)([+-]\d+(?:\.\d+)?)/),
+      captured =
+        full?.DateTimeOriginal || full?.CreateDate || full?.DateCreated,
+      latitude = Number(
+        gps?.latitude ??
+          full?.latitude ??
+          (appleCoordinates ? appleCoordinates[1] : undefined),
+      ),
+      longitude = Number(
+        gps?.longitude ??
+          full?.longitude ??
+          (appleCoordinates ? appleCoordinates[2] : undefined),
+      ),
+      date =
+        captured instanceof Date ? captured : new Date(String(captured || ""));
+    return {
+      ...base,
+      latitude: Number.isFinite(latitude) ? latitude : undefined,
+      longitude: Number.isFinite(longitude) ? longitude : undefined,
+      capturedAt: Number.isFinite(date.getTime())
+        ? date.toISOString()
+        : undefined,
+      make: String(full?.Make || "").slice(0, 80) || undefined,
+      model: String(full?.Model || "").slice(0, 80) || undefined,
+      orientation: Number.isFinite(Number(orientation))
+        ? Number(orientation)
+        : undefined,
+    };
+  } catch {
+    return base;
+  }
+}
+
 async function optimizePhoto(file: File): Promise<File> {
   // Preserve original EXIF location/time whenever it fits the upload limit.
   if (file.size < 10_000_000) return file;
@@ -2306,11 +2498,13 @@ async function optimizePhoto(file: File): Promise<File> {
 }
 
 function ReportSheet({
+  testMode,
   initialLocation,
   locate,
   close,
   onStatus,
 }: {
+  testMode: boolean;
   initialLocation: google.maps.LatLngLiteral | null;
   locate: () => Promise<google.maps.LatLngLiteral>;
   close: () => void;
@@ -2341,6 +2535,12 @@ function ReportSheet({
     "AI analysis",
     "Decision",
   ];
+  useEffect(
+    () => () => {
+      if (preview) URL.revokeObjectURL(preview);
+    },
+    [preview],
+  );
   function dictate() {
     const SpeechRecognition =
       (
@@ -2396,6 +2596,7 @@ function ReportSheet({
         description: description.trim(),
         severity,
         photoSource,
+        testMode,
         idempotencyKey,
       });
       const { reportId } = session.data as {
@@ -2404,6 +2605,7 @@ function ReportSheet({
       setStageNumber(1);
       currentStage = "Preparing photo…";
       setStage(currentStage);
+      const clientMetadata = await readClientPhotoMetadata(photo);
       const preparedPhoto = await optimizePhoto(photo);
       if (preparedPhoto.size > 10 * 1024 * 1024)
         throw new Error("PHOTO_TOO_LARGE");
@@ -2419,57 +2621,30 @@ function ReportSheet({
       await httpsCallable(
         functions,
         "uploadReportEvidence",
-      )({ reportId, imageBase64, contentType: preparedPhoto.type });
+      )({
+        reportId,
+        imageBase64,
+        contentType: preparedPhoto.type,
+        clientMetadata,
+      });
       setStageNumber(2);
       currentStage = "Image uploaded. Parsing GPS, time and file metadata…";
       setStage(currentStage);
-      await httpsCallable(functions, "prepareReportVerification")({ reportId });
+      const metadataResult = await httpsCallable(
+          functions,
+          "prepareReportVerification",
+        )({ reportId }),
+        metadata = metadataResult.data as {
+          hasGps: boolean;
+          hasCaptureTime: boolean;
+        };
       setStageNumber(3);
-      currentStage = "Metadata parsed. Gemini is analyzing the evidence…";
+      currentStage = `Metadata parsed (${metadata.hasGps ? "photo GPS found" : "current app location retained"}, ${metadata.hasCaptureTime ? "capture time found" : "submission time retained"}). AI verification is queued…`;
       setStage(currentStage);
-      await new Promise<void>((resolve, reject) => {
-        let settled = false;
-        const timeout = window.setTimeout(() => {
-          if (!settled) {
-            settled = true;
-            stop();
-            reject(new Error("AI_CONTINUING"));
-          }
-        }, 90_000);
-        const stop = onSnapshot(
-          doc(db, "reports", reportId),
-          (snap) => {
-            const status = (snap.data() as Sighting | undefined)
-              ?.verificationStatus;
-            if (
-              status &&
-              ![
-                "uploading",
-                "uploaded",
-                "automated_review",
-                "pending",
-              ].includes(status)
-            ) {
-              settled = true;
-              window.clearTimeout(timeout);
-              stop();
-              setStageNumber(5);
-              setStage(
-                status === "provisional" || status === "confirmed"
-                  ? "AI verification complete — sighting added to the map."
-                  : status === "review_required"
-                    ? "AI checks complete — specialist review required."
-                    : `Verification complete: ${status}.`,
-              );
-              window.setTimeout(resolve, 900);
-            }
-          },
-          reject,
-        );
-      });
+      await new Promise((resolve) => window.setTimeout(resolve, 650));
       close();
       onStatus(
-        "Verification completed. Open the bell to see the full decision.",
+        "Image and metadata are confirmed. AI is running in the background; open the bell for live progress and the decision.",
       );
     } catch (err) {
       console.error(err);
@@ -2484,9 +2659,7 @@ function ReportSheet({
             : code.includes("permission-denied") ||
                 code.includes("unauthorized")
               ? "Upload permission was denied. Sign out, sign in, and retry."
-              : message === "AI_CONTINUING"
-                ? "Image and metadata are confirmed. AI is still working in the background; check the bell for the result."
-                : `Submission stopped during “${currentStage}”. ${code || message || "Please retry."}`,
+              : `Submission stopped during “${currentStage}”. ${code || message || "Please retry."}`,
       );
     } finally {
       setSaving(false);
@@ -2789,6 +2962,20 @@ function ReportsPanel({
     ["uploading", "uploaded", "automated_review", "pending"].includes(status);
   const protecting = (status: Sighting["verificationStatus"]) =>
     ["provisional", "confirmed", "approved"].includes(status);
+  const stages = ["Report", "Image", "Metadata", "AI/checks", "Decision"];
+  function progress(report: Sighting) {
+    if (report.verificationStatus === "expired")
+      return { completed: 1, active: -1 };
+    if (report.verificationStatus === "uploading")
+      return { completed: 1, active: 1 };
+    if (report.verificationStatus === "uploaded")
+      return { completed: 2, active: 2 };
+    if (report.verificationStatus === "automated_review")
+      return { completed: 3, active: 3 };
+    if (report.verificationStatus === "review_required")
+      return { completed: 4, active: 4 };
+    return { completed: 5, active: -1 };
+  }
   return (
     <section className="notification-panel reports-panel">
       <header>
@@ -2806,7 +2993,7 @@ function ReportsPanel({
         <p>No reports yet.</p>
       ) : (
         reports.map((r) => (
-          <article key={r.id}>
+          <article key={r.id} data-report-id={r.id}>
             {r.imageUrl && <img src={r.imageUrl} alt="Report evidence" />}
             <span
               className={`status-dot ${protecting(r.verificationStatus) ? "approved" : r.verificationStatus}`}
@@ -2822,56 +3009,50 @@ function ReportsPanel({
                       ? "Sent to a human safety reviewer"
                       : r.verificationStatus === "uploading"
                         ? "Photo upload did not finish"
-                        : pending(r.verificationStatus)
-                          ? "Verification in progress"
-                          : "Not added to the map"}
+                        : r.verificationStatus === "uploaded"
+                          ? "Image upload confirmed"
+                          : pending(r.verificationStatus)
+                            ? "Verification in progress"
+                            : "Not added to the map"}
               </strong>
               <p>
-                {r.verificationStatus === "automated_review"
-                  ? "AI is checking the dog, scene, time, location evidence, and duplicates. You can close Pawlytics."
-                  : r.verificationStatus === "review_required"
-                    ? "Automated checks finished, but a person must make the final decision."
-                    : r.verificationStatus === "uploading"
-                      ? "The evidence is not queued. Submit a new report; incomplete uploads expire automatically."
-                      : pending(r.verificationStatus)
-                        ? "Your evidence is safely queued. You can close Pawlytics."
-                        : r.aiReason || r.aiSummary || r.description}
+                {r.verificationStatus === "uploaded"
+                  ? "The server has the image. GPS, capture time, device metadata, and orientation are being parsed next."
+                  : r.verificationStatus === "automated_review" &&
+                      r.processingStatus === "ai_queued"
+                    ? "Image metadata is confirmed. AI analysis is queued; you can close Pawlytics."
+                    : r.verificationStatus === "automated_review"
+                      ? "AI is checking the dog, scene, time, location evidence, manipulation, and duplicates. You can close Pawlytics."
+                      : r.verificationStatus === "review_required"
+                        ? "Automated checks finished, but a person must make the final decision."
+                        : r.verificationStatus === "uploading"
+                          ? "The evidence is not queued. Submit a new report; incomplete uploads expire automatically."
+                          : pending(r.verificationStatus)
+                            ? "Your evidence is safely queued. You can close Pawlytics."
+                            : r.aiReason || r.aiSummary || r.description}
               </p>
-              <div
+              <ol
                 className="verification-timeline"
                 aria-label="Verification progress"
               >
-                <i className="done" />
-                <i
-                  className={r.verificationStatus === "uploading" ? "" : "done"}
-                />
-                <i
-                  className={
-                    [
-                      "provisional",
-                      "confirmed",
-                      "approved",
-                      "review_required",
-                      "rejected",
-                      "duplicate",
-                    ].includes(r.verificationStatus)
-                      ? "done"
-                      : r.verificationStatus === "automated_review"
-                        ? "active"
-                        : ""
-                  }
-                />
-                <i
-                  className={
-                    protecting(r.verificationStatus) ||
-                    ["rejected", "duplicate"].includes(r.verificationStatus)
-                      ? "done"
-                      : r.verificationStatus === "review_required"
-                        ? "active"
-                        : ""
-                  }
-                />
-              </div>
+                {stages.map((label, index) => {
+                  const state = progress(r);
+                  return (
+                    <li key={label}>
+                      <i
+                        className={
+                          index < state.completed
+                            ? "done"
+                            : index === state.active
+                              ? "active"
+                              : ""
+                        }
+                      />
+                      <small>{label}</small>
+                    </li>
+                  );
+                })}
+              </ol>
               <small>
                 {sightingDate(r.createdAt).toLocaleString()} ·{" "}
                 {r.lat?.toFixed(4)}, {r.lng?.toFixed(4)}

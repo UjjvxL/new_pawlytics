@@ -46,9 +46,24 @@ export interface Sighting {
   photoCapturedAt?: { toDate: () => Date } | Date;
   photoSource?: "camera" | "library";
   manipulationLikely?: boolean;
-  decisionSource?: "ai_only" | "ai_rejection" | "human_required";
+  decisionSource?:
+    | "ai_only"
+    | "ai_rejection"
+    | "human_required"
+    | "admin_test_ai"
+    | "admin_test_fallback";
+  aiModel?: string;
+  aiFallback?: boolean;
   humanReviewRequired?: boolean;
   evidenceQuality?: "strong" | "limited";
+  metadataSource?: "server_exif" | "client_preprocess" | "none";
+  metadataLocationSource?: "server_exif" | "client_preprocess" | "none";
+  metadataTimeSource?: "server_exif" | "client_preprocess" | "none";
+  metadataHasGps?: boolean;
+  metadataHasCaptureTime?: boolean;
+  metadataMake?: string;
+  metadataModel?: string;
+  metadataOrientation?: number;
   storagePath?: string;
   testOnly?: boolean;
   provisional?: boolean;
