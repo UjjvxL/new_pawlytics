@@ -324,6 +324,30 @@ test("NCR authority demo connects command, district, incident, ABC and care oper
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth + 1);
 });
 
+test("watch demo is fullscreen at watch size and supports core safety actions", async ({ page, context }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-chrome", "one watch-sized interaction pass is sufficient");
+  await page.setViewportSize({ width: 198, height: 242 });
+  await context.setGeolocation({ latitude: 28.4589, longitude: 77.4947 });
+  await page.goto("/demo/watch");
+  const watch = page.locator(".watch-case");
+  await expect(watch).toBeVisible();
+  const bounds = await watch.boundingBox();
+  expect(bounds?.width).toBe(198);
+  expect(bounds?.height).toBe(242);
+  await expect(page.getByText("Low risk")).toBeVisible();
+
+  await page.getByRole("button", { name: /Start safe walk/ }).click();
+  await page.getByRole("button", { name: /KP II Metro/ }).click();
+  await expect(page.getByRole("link", { name: "Start route" })).toHaveAttribute("href", /google\.com\/maps\/dir/);
+  await page.getByRole("button", { name: "Back to watch home" }).click();
+  await page.getByRole("button", { name: "Spot dog" }).click();
+  await page.getByRole("button", { name: "Confirm sighting" }).click();
+  await expect(page.getByText("Alert sent")).toBeVisible();
+  await page.getByRole("button", { name: "Back to watch home" }).click();
+  await page.getByRole("button", { name: /Bite help/ }).click();
+  await expect(page.getByRole("link", { name: "Call 112" })).toHaveAttribute("href", "tel:112");
+});
+
 test("legacy service workers are removed and repeated reloads remain usable", async ({
   page,
 }) => {

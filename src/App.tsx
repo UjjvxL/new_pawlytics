@@ -67,6 +67,7 @@ import {
 import type { Severity, Sighting, UserProfile } from "./types";
 import PawLogo from "./PawLogo";
 import DemoAuthorityPortal from "./DemoAuthorityPortal";
+import WatchDemo from "./WatchDemo";
 import {
   DEFAULT_DEMO_SIGHTINGS,
   DEFAULT_DEMO_REVIEWS,
@@ -939,6 +940,8 @@ export default function App() {
     [sightings, testMode, demoMode, manualSightings],
   );
 
+  if (window.location.pathname.startsWith("/demo/watch"))
+    return <WatchDemo />;
   if (window.location.pathname.startsWith("/demo/authority"))
     return <DemoAuthorityPortal />;
   if (window.location.pathname.startsWith("/authority"))
@@ -1142,6 +1145,9 @@ export default function App() {
               </span>
               <a className="demo-authority-link" href="/demo/authority">
                 <BarChart3 size={13} /> Open authority command
+              </a>
+              <a className="demo-authority-link watch" href="/demo/watch">
+                <HeartPulse size={13} /> Open Watch demo
               </a>
             </section>
           )}
