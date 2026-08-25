@@ -35,6 +35,45 @@ test("test URL is isolated and exposes manual dog placement and safe-route toggl
   await expect(page.getByText("Safe route", { exact: true })).toBeVisible();
 });
 
+test("NCR scale demo is isolated and exposes judge route presets", async ({
+  page,
+}) => {
+  await page.goto("/demo");
+
+  await expect(page.getByText("LIVE NCR SCALE DEMO")).toBeVisible();
+  await expect(page.getByText(/1,200.*demo dogs/)).toBeVisible();
+  await expect(page.getByText("Safe path", { exact: true })).toBeVisible();
+  await expect(page.getByText("Manual route testing")).toHaveCount(0);
+  await page.getByRole("button", { name: "Where to?" }).click();
+  await expect(
+    page.getByRole("button", { name: "Pari Chowk" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Knowledge Park II Metro" }),
+  ).toBeVisible();
+});
+
+test("NCR judge route demonstrably avoids the seeded danger corridor", async ({
+  page,
+  context,
+}, testInfo) => {
+  test.skip(
+    testInfo.project.name !== "desktop-chrome",
+    "one Directions API comparison is sufficient",
+  );
+  await context.setGeolocation({ latitude: 28.4589, longitude: 77.4947 });
+  await page.goto("/demo");
+  await expect(page.locator(".map .gm-style")).toBeVisible({ timeout: 20_000 });
+  await page.getByRole("button", { name: "Where to?" }).click();
+  await page.getByRole("button", { name: "Pari Chowk" }).click();
+  await expect(page.getByText(/Shield avoided \d+ danger-risk points/)).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(
+    page.getByRole("link", { name: "Start this route in Google Maps" }),
+  ).toHaveAttribute("href", /google\.com\/maps\/dir\/\?.*waypoints=/);
+});
+
 test("Google map tiles and destination suggestions are operational", async ({
   page,
 }, testInfo) => {

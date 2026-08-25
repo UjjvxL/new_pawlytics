@@ -182,3 +182,131 @@ export const DEFAULT_DEMO_REVIEWS: DemoReviewCase[] = [
     createdAt: new Date(Date.now() - 3600000 * 24),
   },
 ];
+
+const DEMO_IMAGES = [
+  "https://firebasestorage.googleapis.com/v0/b/pawlytics-506516.firebasestorage.app/o/publicEvidence%2F0b3f64bea0bc3e19833ef4881dd0f899%2Fthumbnail.jpg?alt=media",
+  "https://firebasestorage.googleapis.com/v0/b/pawlytics-506516.firebasestorage.app/o/publicEvidence%2Fb88bea047af0b63ca8220aa3c3659fa9%2Fthumbnail.jpg?alt=media",
+  "https://firebasestorage.googleapis.com/v0/b/pawlytics-506516.firebasestorage.app/o/publicEvidence%2Fedd9e1cded6aed3fa5b050e556cee81f%2Fthumbnail.jpg?alt=media",
+];
+
+const NCR_DEMO_AREAS = [
+  ["IILM University, Knowledge Park II", 28.4589, 77.4947],
+  ["Knowledge Park II Metro", 28.4644, 77.4895],
+  ["Knowledge Park III", 28.4722, 77.4838],
+  ["Pari Chowk", 28.4657, 77.5108],
+  ["Alpha I", 28.4724, 77.5102],
+  ["Alpha II", 28.4781, 77.5176],
+  ["Beta I", 28.4594, 77.5203],
+  ["Beta II", 28.4527, 77.5271],
+  ["Gamma I", 28.4819, 77.5252],
+  ["Gamma II", 28.4882, 77.5309],
+  ["Delta I", 28.4893, 77.5399],
+  ["Greater Noida West", 28.5793, 77.4316],
+  ["Noida Sector 62", 28.6261, 77.3654],
+  ["Noida Sector 18", 28.5708, 77.3261],
+  ["Botanical Garden", 28.5641, 77.3343],
+  ["South East Delhi", 28.5355, 77.2582],
+] as const;
+
+const DEMO_BEHAVIOURS = [
+  ["calm", "resting beside a shaded footpath"],
+  ["roaming", "moving between the service lane and pavement"],
+  ["alert", "barking when pedestrians pass the waste point"],
+  ["following", "following walkers for a short distance"],
+  ["territorial", "guarding a food stall and nearby lane"],
+] as const;
+
+const JUDGE_ROUTE = {
+  start: { lat: 28.4589, lng: 77.4947 },
+  end: { lat: 28.4657, lng: 77.5108 },
+};
+
+function distanceFromJudgeCorridor(lat: number, lng: number) {
+  const { start, end } = JUDGE_ROUTE;
+  const dx = end.lat - start.lat;
+  const dy = end.lng - start.lng;
+  const t = Math.max(
+    0,
+    Math.min(
+      1,
+      ((lat - start.lat) * dx + (lng - start.lng) * dy) /
+        (dx * dx + dy * dy),
+    ),
+  );
+  return Math.hypot(
+    lat - (start.lat + t * dx),
+    lng - (start.lng + t * dy),
+  ) * 111_000;
+}
+
+/**
+ * A deterministic, client-only scale dataset. Two reports form each 250 m
+ * hotspot so the map exercises aggregation and the evidence carousel without
+ * writing fake reports to production Firestore or awarding incentive points.
+ */
+export const NCR_SCALE_DEMO_SIGHTINGS: Sighting[] = NCR_DEMO_AREAS.flatMap(
+  ([area, areaLat, areaLng], areaIndex) =>
+    Array.from({ length: 15 }, (_, hotspotIndex) => {
+      const row = Math.floor(hotspotIndex / 5) - 1;
+      const column = (hotspotIndex % 5) - 2;
+      let lat = areaLat + row * 0.0049 + (areaIndex % 2) * 0.00035;
+      let lng = areaLng + column * 0.0053 + (hotspotIndex % 2) * 0.00025;
+      // Keep a single obvious obstruction on the IILM → Pari Chowk shortest
+      // path and move other local demo clusters outside its safe corridor.
+      if (areaIndex === 0 && hotspotIndex === 0) {
+        lat = 28.45895;
+        lng = 77.5027;
+      } else if (areaIndex < 8 && distanceFromJudgeCorridor(lat, lng) < 700) {
+        lat += hotspotIndex % 2 ? 0.009 : -0.009;
+      }
+      const totalDogs = [3, 6, 4, 7][(areaIndex + hotspotIndex) % 4];
+      const [behavior, detail] =
+        DEMO_BEHAVIOURS[(areaIndex * 3 + hotspotIndex) % DEMO_BEHAVIOURS.length];
+      return [0, 1].map((reportIndex): Sighting => {
+        const dogCount =
+          reportIndex === 0 ? Math.ceil(totalDogs / 2) : Math.floor(totalDogs / 2);
+        const image =
+          DEMO_IMAGES[(areaIndex + hotspotIndex + reportIndex) % DEMO_IMAGES.length];
+        return {
+          id: `ncr-demo-${areaIndex}-${hotspotIndex}-${reportIndex}`,
+          lat: lat + (reportIndex ? 0.00032 : -0.00032),
+          lng: lng + (reportIndex ? -0.00024 : 0.00024),
+          sightingTimezone: "Asia/Kolkata",
+          description: `${dogCount} community dog${dogCount === 1 ? "" : "s"} ${detail} near ${area}.`,
+          severity: totalDogs >= 5 ? "high" : "medium",
+          dogCount,
+          imageUrl: image,
+          thumbnailUrl: image,
+          createdAt: new Date(
+            Date.now() -
+              ((areaIndex * 15 + hotspotIndex) * 11 + reportIndex * 7 + 8) *
+                60_000,
+          ),
+          expiresAt: new Date(Date.now() + 48 * 3_600_000),
+          verificationStatus: reportIndex ? "confirmed" : "provisional",
+          observedBehavior: behavior,
+          aiSummary: `AI verified ${dogCount} visible dog${dogCount === 1 ? "" : "s"} ${detail}.`,
+          aiConfidence: 0.86 + ((areaIndex + hotspotIndex) % 11) / 100,
+          locationEvidence: "GPS + visual landmark match",
+          privacySafeForPublic: true,
+          sharePublicImage: true,
+          testOnly: true,
+        };
+      });
+    }).flat(),
+);
+
+export const NCR_DEMO_STATS = {
+  reports: NCR_SCALE_DEMO_SIGHTINGS.length,
+  hotspots: NCR_DEMO_AREAS.length * 15,
+  dogs: NCR_SCALE_DEMO_SIGHTINGS.reduce(
+    (total, report) => total + (report.dogCount || 1),
+    0,
+  ),
+};
+
+export const NCR_DEMO_DESTINATIONS = [
+  { label: "Pari Chowk", lat: 28.4657, lng: 77.5108 },
+  { label: "Knowledge Park II Metro", lat: 28.4644, lng: 77.4895 },
+  { label: "Alpha I Commercial Belt", lat: 28.4724, lng: 77.5102 },
+] as const;

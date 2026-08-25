@@ -1023,6 +1023,99 @@ textarea {
 .demo-controls label input:checked + i:after {
   transform: translateX(16px);
 }
+.scale-demo-panel {
+  position: absolute;
+  z-index: 2;
+  left: 16px;
+  right: 16px;
+  bottom: 208px;
+  min-height: 54px;
+  padding: 9px 12px;
+  border: 1px solid #cfe5dc;
+  border-radius: 15px;
+  background: #fffffff2;
+  box-shadow: 0 4px 18px #182e2529;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.scale-demo-panel > div {
+  display: grid;
+  min-width: 0;
+}
+.scale-demo-panel strong {
+  color: #136f63;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+.scale-demo-panel small {
+  color: #65746e;
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.scale-demo-panel label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  color: #35463f;
+  font-size: 11px;
+  font-weight: 800;
+}
+.scale-demo-panel input {
+  position: absolute;
+  opacity: 0;
+}
+.scale-demo-panel label i {
+  width: 36px;
+  height: 21px;
+  border-radius: 12px;
+  background: #b8c2be;
+  position: relative;
+}
+.scale-demo-panel label i:after {
+  content: "";
+  position: absolute;
+  width: 17px;
+  height: 17px;
+  top: 2px;
+  left: 2px;
+  border-radius: 50%;
+  background: white;
+  transition: transform 0.2s;
+}
+.scale-demo-panel input:checked + i {
+  background: #136f63;
+}
+.scale-demo-panel input:checked + i:after {
+  transform: translateX(15px);
+}
+.demo-destinations {
+  display: grid;
+  gap: 7px;
+  margin: 12px 0;
+}
+.demo-destinations > small {
+  color: #687872;
+  font-size: 11px;
+  font-weight: 700;
+}
+.demo-destinations button {
+  min-height: 43px;
+  border: 1px solid #d8e5df;
+  border-radius: 11px;
+  background: #f4fbf8;
+  color: #174f45;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 12px;
+  font-weight: 750;
+  text-align: left;
+}
 /* Mobile map shell: keep every primary action inside the viewport. */
 .topbar {
   gap: 10px;

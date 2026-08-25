@@ -55,7 +55,13 @@ import {
 } from "./firebase";
 import type { Severity, Sighting, UserProfile } from "./types";
 import PawLogo from "./PawLogo";
-import { DEFAULT_DEMO_SIGHTINGS, DEFAULT_DEMO_REVIEWS } from "./demoData";
+import {
+  DEFAULT_DEMO_SIGHTINGS,
+  DEFAULT_DEMO_REVIEWS,
+  NCR_DEMO_DESTINATIONS,
+  NCR_DEMO_STATS,
+  NCR_SCALE_DEMO_SIGHTINGS,
+} from "./demoData";
 
 const INDIA = { lat: 20.5937, lng: 78.9629 };
 const riskRadius: Record<Severity, number> = {
@@ -188,15 +194,19 @@ function distanceToSegment(
 function routeRisk(route: google.maps.DirectionsRoute, sightings: Sighting[]) {
   const path = route.overview_path.map((p) => p.toJSON());
   return sightings.reduce((score, sighting) => {
+    const point = { lat: sighting.lat, lng: sighting.lng };
+    const radius = riskRadius[sighting.severity];
+    if (
+      distanceToSegment(point, path[0], path[0]) <= radius + 300 ||
+      distanceToSegment(point, path[path.length - 1], path[path.length - 1]) <=
+        radius + 300
+    )
+      return score;
     const hit = path
       .slice(1)
       .some(
         (p, i) =>
-          distanceToSegment(
-            { lat: sighting.lat, lng: sighting.lng },
-            path[i],
-            p,
-          ) < riskRadius[sighting.severity],
+          distanceToSegment(point, path[i], p) < radius,
       );
     return score + (hit ? riskWeight[sighting.severity] : 0);
   }, 0);
@@ -240,6 +250,7 @@ export default function App() {
   const testMode =
     window.location.pathname === "/test" ||
     new URLSearchParams(window.location.search).has("test");
+  const demoMode = window.location.pathname === "/demo";
   const [manualSightings, setManualSightings] = useState<Sighting[]>([]);
   const [placementMode, setPlacementMode] = useState(false);
   const [originPlacementMode, setOriginPlacementMode] = useState(false);
@@ -328,6 +339,10 @@ export default function App() {
     );
   }, [user]);
   useEffect(() => {
+    if (demoMode) {
+      setSightings(NCR_SCALE_DEMO_SIGHTINGS);
+      return;
+    }
     if (!isFirebaseConfigured) {
       setSightings(DEFAULT_DEMO_SIGHTINGS);
       return;
@@ -346,7 +361,7 @@ export default function App() {
         setSightings(DEFAULT_DEMO_SIGHTINGS);
       },
     );
-  }, []);
+  }, [demoMode]);
 
   useEffect(() => {
     const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -456,7 +471,7 @@ export default function App() {
     markers.current.forEach((m) => (m.map = null));
     const visibleSightings = (
       testMode ? [...sightings, ...manualSightings] : sightings
-    ).filter((s) => (testMode || !s.testOnly) && isActiveSighting(s));
+    ).filter((s) => (testMode || demoMode || !s.testOnly) && isActiveSighting(s));
     const hotspots = groupHotspots(visibleSightings);
     riskCircles.current.forEach((c) => c.setMap(null));
     riskCircles.current = hotspots.map(
@@ -490,7 +505,7 @@ export default function App() {
       });
       return marker;
     });
-  }, [mapsReady, sightings, testMode, manualSightings]);
+  }, [mapsReady, sightings, testMode, demoMode, manualSightings]);
 
   useEffect(() => {
     if (
@@ -635,9 +650,9 @@ export default function App() {
   const activeRisk = useMemo(
     () =>
       (testMode ? [...sightings, ...manualSightings] : sightings).filter(
-        (s) => (testMode || !s.testOnly) && isActiveSighting(s),
+        (s) => (testMode || demoMode || !s.testOnly) && isActiveSighting(s),
       ),
-    [sightings, testMode, manualSightings],
+    [sightings, testMode, demoMode, manualSightings],
   );
 
   if (window.location.pathname.startsWith("/authority"))
@@ -760,9 +775,39 @@ export default function App() {
       )}
       <div className="risk-chip">
         <ShieldCheck size={17} />
-        <strong>{activeRisk.length}</strong> active sighting
-        {activeRisk.length === 1 ? "" : "s"} nearby
+        {demoMode ? (
+          <span>
+            <strong>{NCR_DEMO_STATS.dogs.toLocaleString()}</strong> demo dogs ·{" "}
+            {NCR_DEMO_STATS.hotspots} hotspots
+          </span>
+        ) : (
+          <>
+            <strong>{activeRisk.length}</strong> active sighting
+            {activeRisk.length === 1 ? "" : "s"} nearby
+          </>
+        )}
       </div>
+      {demoMode && (
+        <section className="scale-demo-panel">
+          <div>
+            <strong>LIVE NCR SCALE DEMO</strong>
+            <small>Verified simulation · production data isolated</small>
+          </div>
+          <label>
+            <span>Safe path</span>
+            <input
+              type="checkbox"
+              checked={safeRouting}
+              onChange={(event) => {
+                setSafeRouting(event.target.checked);
+                renderer.current?.set("directions", null);
+                setNavigation(null);
+              }}
+            />
+            <i />
+          </label>
+        </section>
+      )}
       {testMode && <div className="demo-chip">Manual route testing</div>}
       {testMode && (
         <section className="demo-controls">
@@ -941,6 +986,7 @@ export default function App() {
           setNotice={setNotice}
           setNavigation={setNavigation}
           safeRouting={safeRouting}
+          demoMode={demoMode}
           onRouteReady={(fn) => {
             reroute.current = fn;
           }}
@@ -1346,7 +1392,7 @@ function ReviewPanel({
     return () => {
       active = false;
     };
-  }, [organizationId, report.id]);
+  }, [organizationId, report.id, report.imageUrl]);
   async function decide(decision: "confirmed" | "rejected" | "duplicate") {
     if (reason.trim().length < 5)
       return onStatus("Add a clear decision reason.");
@@ -2208,6 +2254,7 @@ function RouteSheet({
   setNotice,
   setNavigation,
   safeRouting,
+  demoMode,
   onRouteReady,
 }: {
   map?: google.maps.Map;
@@ -2219,6 +2266,7 @@ function RouteSheet({
   setNotice: (v: string) => void;
   setNavigation: (v: NavigationInfo) => void;
   safeRouting: boolean;
+  demoMode: boolean;
   onRouteReady: (fn: (risks: Sighting[]) => Promise<void>) => void;
 }) {
   const destinationRef = useRef<HTMLInputElement>(null);
@@ -2336,10 +2384,18 @@ function RouteSheet({
         const north = destinationPoint.lat - origin.lat;
         const east = (destinationPoint.lng - origin.lng) * latitudeScale;
         const length = Math.hypot(north, east) || 1;
-        const dangerous = routeSightings
-          .filter((s) => routeRisk(result.routes[0], [s]) > 0)
+        const dangerous = groupHotspots(
+          routeSightings.filter((s) => routeRisk(result.routes[0], [s]) > 0),
+        )
+          .sort((a, b) => b.totalDogs - a.totalDogs)
+          .map((hotspot) => ({
+            ...hotspot.reports[0],
+            lat: hotspot.lat,
+            lng: hotspot.lng,
+            severity: hotspot.severity,
+          }))
           .slice(0, 3);
-        const detourRequests = dangerous.flatMap((s) =>
+        const hotspotDetours = dangerous.flatMap((s) =>
           [-1, 1].map((side) => {
             const offset = (riskRadius[s.severity] * 2.2) / 111_000;
             const point = {
@@ -2355,6 +2411,37 @@ function RouteSheet({
             });
           }),
         );
+        const broadDemoDetours = demoMode
+          ? [700, 1_200, 1_800].flatMap((metres) =>
+              [-1, 1].map((side) => {
+                const midpoint = {
+                  lat: (origin.lat + destinationPoint.lat) / 2,
+                  lng: (origin.lng + destinationPoint.lng) / 2,
+                };
+                return service.route({
+                  origin,
+                  destination,
+                  travelMode: google.maps.TravelMode.WALKING,
+                  provideRouteAlternatives: false,
+                  waypoints: [
+                    {
+                      location: {
+                        lat:
+                          midpoint.lat +
+                          (side * (-east / length) * metres) / 111_000,
+                        lng:
+                          midpoint.lng +
+                          (side * (north / length) * metres) /
+                            (111_000 * latitudeScale),
+                      },
+                      stopover: false,
+                    },
+                  ],
+                });
+              }),
+            )
+          : [];
+        const detourRequests = [...hotspotDetours, ...broadDemoDetours];
         const detours = await Promise.allSettled(detourRequests);
         detours.forEach((response) => {
           if (response.status !== "fulfilled") return;
@@ -2474,6 +2561,27 @@ function RouteSheet({
               >
                 <MapPin size={18} />
                 <span>{prediction.text.toString()}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {demoMode && !suggestions.length && (
+          <div className="demo-destinations">
+            <small>One-tap judge routes from your current position</small>
+            {NCR_DEMO_DESTINATIONS.map((destination) => (
+              <button
+                key={destination.label}
+                type="button"
+                disabled={routing}
+                onClick={() => {
+                  setSearchText(destination.label);
+                  void navigate(
+                    new google.maps.LatLng(destination.lat, destination.lng),
+                  );
+                }}
+              >
+                <Navigation size={16} />
+                <span>{destination.label}</span>
               </button>
             ))}
           </div>
