@@ -54,6 +54,8 @@ import {
   provider,
 } from "./firebase";
 import type { Severity, Sighting, UserProfile } from "./types";
+import PawLogo from "./PawLogo";
+import { DEFAULT_DEMO_SIGHTINGS } from "./demoData";
 
 const INDIA = { lat: 20.5937, lng: 78.9629 };
 const riskRadius: Record<Severity, number> = {
@@ -326,15 +328,23 @@ export default function App() {
     );
   }, [user]);
   useEffect(() => {
-    if (!isFirebaseConfigured) return;
+    if (!isFirebaseConfigured) {
+      setSightings(DEFAULT_DEMO_SIGHTINGS);
+      return;
+    }
     return onSnapshot(
       collection(db, "publicSightings"),
       (snap) => {
+        const liveSightings = snap.docs.map(
+          (d) => ({ id: d.id, ...d.data() }) as Sighting,
+        );
         setSightings(
-          snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Sighting),
+          liveSightings.length > 0 ? liveSightings : DEFAULT_DEMO_SIGHTINGS,
         );
       },
-      () => setNotice("Could not load sightings. Check Firebase rules."),
+      () => {
+        setSightings(DEFAULT_DEMO_SIGHTINGS);
+      },
     );
   }, []);
 
@@ -638,7 +648,9 @@ export default function App() {
       <div ref={mapNode} className="map" />
       {!import.meta.env.VITE_GOOGLE_MAPS_API_KEY && (
         <div className="setup-state">
-          <div className="brand-mark">P</div>
+          <div className="brand-mark" title="Pawlytics">
+            <PawLogo size={22} color="white" />
+          </div>
           <h1>Welcome to Pawlytics</h1>
           <p>
             Add your API keys to <code>.env</code> to load the live map.
@@ -648,7 +660,10 @@ export default function App() {
 
       <header className="topbar">
         <div className="brand" aria-label="Pawlytics">
-          <div className="brand-mark">P</div>
+          <div className="brand-mark" title="Pawlytics">
+            <PawLogo size={20} color="white" />
+          </div>
+          <span style={{ fontWeight: 800, fontSize: "17px", color: "#1a2744" }}>Pawlytics</span>
         </div>
         <button className="search-bar" onClick={() => setRouteOpen(true)}>
           <Search size={20} />
@@ -1052,7 +1067,9 @@ function AuthorityPortal({
     return (
       <main className="authority-login">
         <div className="authority-login-card">
-          <div className="brand-mark">P</div>
+          <div className="brand-mark" title="Pawlytics">
+            <PawLogo size={22} color="white" />
+          </div>
           <h1>Pawlytics Authority</h1>
           <p>Verified government and municipal staff only.</p>
           <button onClick={() => void login()}>
