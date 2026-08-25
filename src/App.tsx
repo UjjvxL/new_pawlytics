@@ -29,6 +29,7 @@ import {
   BarChart3,
   Bell,
   Camera,
+  Cctv,
   CircleCheck,
   Crosshair,
   Download,
@@ -68,6 +69,7 @@ import type { Severity, Sighting, UserProfile } from "./types";
 import PawLogo from "./PawLogo";
 import DemoAuthorityPortal from "./DemoAuthorityPortal";
 import WatchDemo from "./WatchDemo";
+import CctvDemo from "./CctvDemo";
 import {
   DEFAULT_DEMO_SIGHTINGS,
   DEFAULT_DEMO_REVIEWS,
@@ -342,6 +344,7 @@ export default function App() {
   const [originPlacementMode, setOriginPlacementMode] = useState(false);
   const [safeRouting, setSafeRouting] = useState(true);
   const [demoPanelOpen, setDemoPanelOpen] = useState(false);
+  const [cctvDemoOpen, setCctvDemoOpen] = useState(false);
   const [carePlaces, setCarePlaces] = useState<CarePlace[]>([]);
   const [careFilters, setCareFilters] = useState<Set<CareCategory>>(
     () => new Set(CARE_CATEGORIES.map((category) => category.id)),
@@ -1052,6 +1055,16 @@ export default function App() {
       )}
 
       <div className="map-actions">
+        {demoMode && (
+          <button
+            className="cctv-demo-button"
+            onClick={() => setCctvDemoOpen(true)}
+            aria-label="Open CCTV dog detection demo"
+            title="CCTV dog detection concept"
+          >
+            <Cctv size={19} />
+          </button>
+        )}
         <button
           className="fullscreen-button"
           onClick={toggleFullscreen}
@@ -1068,6 +1081,9 @@ export default function App() {
           <Crosshair size={21} />
         </button>
       </div>
+      {demoMode && cctvDemoOpen && (
+        <CctvDemo close={() => setCctvDemoOpen(false)} />
+      )}
       {locationState !== "tracking" && (
         <div className={`location-status ${locationState}`}>
           <span className="location-spinner" />

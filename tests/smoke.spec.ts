@@ -112,6 +112,30 @@ test("NCR scale demo is isolated and exposes judge route presets", async ({
   }
 });
 
+test("demo CCTV concept is clearly simulated and opens above fullscreen", async ({ page }) => {
+  await page.goto("/demo");
+  const cctv = page.getByRole("button", { name: "Open CCTV dog detection demo" });
+  const fullscreen = page.getByRole("button", { name: "Enter fullscreen" });
+  const [cctvBounds, fullscreenBounds] = await Promise.all([
+    cctv.boundingBox(),
+    fullscreen.boundingBox(),
+  ]);
+  if (!cctvBounds || !fullscreenBounds) throw new Error("Demo map actions unavailable");
+  expect(cctvBounds.y + cctvBounds.height).toBeLessThan(fullscreenBounds.y);
+
+  await cctv.click();
+  const dialog = page.getByRole("dialog", { name: "CCTV dog detection concept demo" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("CONCEPT DEMO")).toBeVisible();
+  await expect(dialog.getByText("PRERECORDED FOOTAGE")).toBeVisible();
+  await expect(dialog.locator("video")).toHaveAttribute("src", "/demo/cctv-dog-detection.mp4");
+  await dialog.getByRole("button", { name: "Close CCTV demo" }).click();
+  await expect(dialog).toHaveCount(0);
+
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Open CCTV dog detection demo" })).toHaveCount(0);
+});
+
 test("NCR demo exposes live animal-care categories and place details", async ({
   page,
   context,
