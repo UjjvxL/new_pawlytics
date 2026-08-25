@@ -13,6 +13,7 @@
     "test:functions": "npm --prefix functions test",
     "test:live": "node scripts/live-smoke.mjs",
     "test:rules": "firebase emulators:exec --only firestore,storage \"node --test tests/firebase-rules.test.mjs\"",
+    "grant:authority": "node scripts/grant-authority-access.mjs",
     "preview": "vite preview",
     "emulators": "firebase emulators:start",
     "deploy:functions": "firebase deploy --only functions"

@@ -267,9 +267,63 @@ export const bootstrapUser = onCall(
     const a = requireAuth(request),
       ref = db.doc(`users/${a.uid}`),
       privateRef = db.doc(`userPrivate/${a.uid}`),
-      settingsRef = db.doc(`userSettings/${a.uid}`);
+      settingsRef = db.doc(`userSettings/${a.uid}`),
+      email = String(a.token.email || "").trim().toLowerCase(),
+      verifiedEmail = Boolean(a.token.email_verified) && email.includes("@"),
+      grantRef = verifiedEmail
+        ? db.doc(`authorityAccessGrants/${sha(email)}`)
+        : null;
+    let authorityProvisioned = false;
     await db.runTransaction(async (tx) => {
-      if ((await tx.get(ref)).exists) {
+      const [profileSnap, grantSnap] = await Promise.all([
+          tx.get(ref),
+          grantRef ? tx.get(grantRef) : Promise.resolve(null),
+        ]),
+        grant = grantSnap?.data(),
+        allowedRoles = [
+          "moderator",
+          "dispatcher",
+          "field_officer",
+          "analyst",
+          "org_admin",
+        ],
+        validGrant =
+          grantRef &&
+          grant?.status === "active" &&
+          cleanText(grant.organizationId, 80) &&
+          allowedRoles.includes(cleanText(grant.role, 40));
+      if (validGrant) {
+        const organizationId = cleanText(grant.organizationId, 80),
+          role = cleanText(grant.role, 40);
+        tx.set(
+          db.doc(`organizations/${organizationId}/members/${a.uid}`),
+          {
+            uid: a.uid,
+            email,
+            role,
+            jurisdictionIds: Array.isArray(grant.jurisdictionIds)
+              ? grant.jurisdictionIds.slice(0, 30)
+              : [],
+            status: "active",
+            mfaRequired: false,
+            provisionedFromGrant: true,
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+        tx.set(
+          grantRef,
+          {
+            claimedBy: a.uid,
+            claimedAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+        authorityProvisioned = true;
+      }
+      if (profileSnap.exists) {
         tx.set(
           ref,
           {
@@ -328,7 +382,14 @@ export const bootstrapUser = onCall(
         homeArea: null,
       });
     });
-    return { ok: true };
+    if (authorityProvisioned) {
+      const user = await getAuth().getUser(a.uid);
+      await getAuth().setCustomUserClaims(a.uid, {
+        ...(user.customClaims || {}),
+        authorityStaff: true,
+      });
+    }
+    return { ok: true, authorityProvisioned };
   },
 );
 
