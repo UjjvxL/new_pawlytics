@@ -97,6 +97,12 @@ test("NCR demo exposes live animal-care categories and place details", async ({
 
   const filters = page.locator(".care-filters button");
   await expect(filters).toHaveCount(5);
+  const searchBounds = await page.getByRole("button", { name: "Where to?" }).boundingBox();
+  const filterBounds = await page.locator(".care-filters").boundingBox();
+  const ncrBounds = await page.getByRole("button", { name: "NCR scale demo controls" }).boundingBox();
+  if (!searchBounds || !filterBounds || !ncrBounds) throw new Error("Demo header bounds unavailable");
+  expect(filterBounds.y - (searchBounds.y + searchBounds.height)).toBeLessThanOrEqual(8);
+  expect(Math.abs(filterBounds.y - ncrBounds.y)).toBeLessThanOrEqual(1);
   await expect(page.getByRole("button", { name: /Emergency vets/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Pet hospitals/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Vet clinics/ })).toBeVisible();
