@@ -43,6 +43,7 @@ import {
   Minimize2,
   Navigation,
   Plus,
+  Phone,
   Search,
   Settings,
   Share2,
@@ -97,6 +98,8 @@ interface CarePlace {
   lng: number;
   rating?: number;
   ratingCount?: number;
+  phone?: string;
+  internationalPhone?: string;
   googleMapsUri: string;
   photos: Array<{ url: string; attribution: string }>;
 }
@@ -717,7 +720,7 @@ export default function App() {
           CARE_CATEGORIES.map(async (category) => {
             const { places } = await Place.searchByText({
               textQuery: category.query,
-              fields: ["id", "displayName", "formattedAddress", "location", "rating", "userRatingCount", "googleMapsURI", "photos"],
+              fields: ["id", "displayName", "formattedAddress", "location", "rating", "userRatingCount", "nationalPhoneNumber", "internationalPhoneNumber", "googleMapsURI", "photos"],
               locationBias: { center: { lat: 28.4589, lng: 77.4947 }, radius: 18_000 },
               maxResultCount: 10,
               region: "IN",
@@ -733,6 +736,8 @@ export default function App() {
                 ...place.location.toJSON(),
                 rating: place.rating ?? undefined,
                 ratingCount: place.userRatingCount ?? undefined,
+                phone: place.nationalPhoneNumber ?? undefined,
+                internationalPhone: place.internationalPhoneNumber ?? undefined,
                 googleMapsUri: place.googleMapsURI || `https://www.google.com/maps/search/?api=1&query_place_id=${encodeURIComponent(place.id)}&query=${encodeURIComponent(place.displayName)}`,
                 photos: (place.photos || []).slice(0, 5).map((photo) => ({
                   url: photo.getURI({ maxWidth: 900, maxHeight: 650 }),
@@ -3443,6 +3448,15 @@ function CarePlaceCard({
         <p>{place.address}</p>
         {place.rating && <small>★ {place.rating.toFixed(1)}{place.ratingCount ? ` · ${place.ratingCount} Google ratings` : ""}</small>}
         <div className="care-place-actions">
+          {(place.internationalPhone || place.phone) && (
+            <a
+              className="care-call"
+              href={`tel:${(place.internationalPhone || place.phone || "").replace(/[^\d+]/g, "")}`}
+              aria-label={`Call ${place.name} at ${place.phone || place.internationalPhone}`}
+            >
+              <Phone size={15} /> Call {place.phone || place.internationalPhone}
+            </a>
+          )}
           <button onClick={route}><ShieldCheck size={15} /> Route safely</button>
           <a href={place.googleMapsUri} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Google Maps</a>
         </div>

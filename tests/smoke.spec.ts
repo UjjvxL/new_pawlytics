@@ -159,6 +159,19 @@ test("NCR demo exposes live animal-care categories and place details", async ({
   await expect(card.getByRole("link", { name: "Google Maps", exact: true }))
     .toHaveAttribute("href", /(maps\.google\.com|google\.com\/maps)/);
 
+  let callableProviderFound = false;
+  const careMarkerCount = await page.locator(".care-marker").count();
+  for (let index = 0; index < careMarkerCount; index += 1) {
+    await page.locator(".care-marker").nth(index).click({ force: true });
+    const callLink = page.locator('.care-place-card a[href^="tel:"]');
+    if (await callLink.count()) {
+      await expect(callLink).toHaveAttribute("href", /^tel:\+?\d+/);
+      callableProviderFound = true;
+      break;
+    }
+  }
+  expect(callableProviderFound).toBeTruthy();
+
   const emergency = page.getByRole("button", { name: /Emergency vets/ });
   await emergency.click();
   await expect(emergency).toHaveAttribute("aria-pressed", "false");

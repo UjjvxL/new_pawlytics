@@ -1381,6 +1381,7 @@ textarea {
 .care-place-actions button, .care-place-actions a { min-height: 32px; border: 0; border-radius: 8px; display: flex; align-items: center; justify-content: center; gap: 5px; font-size: 10px; font-weight: 800; text-decoration: none; }
 .care-place-actions button { background: #136f63; color: white; }
 .care-place-actions a { background: #edf3f0; color: #35463f; }
+.care-place-actions a.care-call { background: #e9f3ff; color: #1769aa; }
 @media (max-width: 420px) {
   .care-place-card { grid-template-columns: 118px minmax(0, 1fr); }
   .care-filters { right: 54px; }
