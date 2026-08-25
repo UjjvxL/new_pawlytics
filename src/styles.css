@@ -1177,6 +1177,129 @@ textarea {
   background: linear-gradient(135deg, #fbbc04, #d93025);
   box-shadow: 0 0 0 3px #fbbc0430;
 }
+.care-filters {
+  position: absolute;
+  z-index: 2;
+  top: 88px;
+  left: 12px;
+  right: 58px;
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  pointer-events: auto;
+}
+.care-filters::-webkit-scrollbar {
+  display: none;
+}
+.care-filters button {
+  flex: none;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid #d6e0dc;
+  border-radius: 15px;
+  background: #fffffff2;
+  color: #697770;
+  box-shadow: 0 1px 4px #20212420;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+.care-filters button.active {
+  border-color: #7db5a7;
+  background: #edf9f5f5;
+  color: #136f63;
+}
+.care-filters button b {
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: #dcebe6;
+  display: grid;
+  place-items: center;
+  font-size: 8px;
+}
+.demo-shell .status-notice {
+  top: 124px;
+}
+.care-marker {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1.5px solid white;
+  border-radius: 7px;
+  background: #287d6d;
+  color: white;
+  box-shadow: 0 1px 5px #20212455;
+  font-size: 8px;
+  font-weight: 900;
+}
+.care-marker.emergency { background: #c73d35; }
+.care-marker.hospital { background: #2774c9; }
+.care-marker.clinic { background: #287d6d; }
+.care-marker.ngo { background: #9a5d9e; }
+.care-marker.rabies { background: #bf7824; }
+.care-place-card {
+  display: grid;
+  grid-template-columns: 145px minmax(0, 1fr);
+  max-height: 280px;
+}
+.care-photo {
+  position: relative;
+  min-height: 190px;
+  background: #e9efec;
+}
+.care-photo > img {
+  width: 100%;
+  height: 100%;
+  min-height: 190px;
+  object-fit: cover;
+}
+.care-photo > small {
+  position: absolute;
+  left: 5px;
+  right: 5px;
+  bottom: 5px;
+  padding: 3px 5px;
+  border-radius: 5px;
+  background: #0009;
+  color: white;
+  font-size: 7px;
+}
+.care-photo-dots {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  display: flex;
+  gap: 3px;
+}
+.care-photo-dots button {
+  width: 6px;
+  height: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #ffffff99;
+}
+.care-photo-dots button.active { background: white; box-shadow: 0 0 0 1px #0004; }
+.care-photo-empty { display: grid; place-items: center; background: #eaf4f0; color: #287d6d; }
+.care-place-info { padding: 14px !important; min-width: 0; }
+.care-place-info > span { color: #287d6d; font-size: 9px; font-weight: 850; text-transform: uppercase; }
+.care-place-info h3 { margin: 5px 22px 4px 0; font-size: 15px; line-height: 1.2; }
+.care-place-info p { margin: 0 0 6px; font-size: 10px; line-height: 1.35; color: #66756f; }
+.care-place-info > small { font-size: 9px; color: #8a671c; }
+.care-place-actions { display: grid; gap: 5px; margin-top: 10px; }
+.care-place-actions button, .care-place-actions a { min-height: 32px; border: 0; border-radius: 8px; display: flex; align-items: center; justify-content: center; gap: 5px; font-size: 10px; font-weight: 800; text-decoration: none; }
+.care-place-actions button { background: #136f63; color: white; }
+.care-place-actions a { background: #edf3f0; color: #35463f; }
+@media (max-width: 420px) {
+  .care-place-card { grid-template-columns: 118px minmax(0, 1fr); }
+  .care-filters { right: 54px; }
+}
 .scale-demo-panel input:checked + i {
   background: #136f63;
 }

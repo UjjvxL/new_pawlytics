@@ -24,6 +24,7 @@ import {
 import { httpsCallable } from "firebase/functions";
 import {
   AlertTriangle,
+  Ambulance,
   ArrowLeft,
   Bell,
   Camera,
@@ -32,6 +33,8 @@ import {
   Download,
   ExternalLink,
   HeartPulse,
+  HandHeart,
+  Hospital,
   Info,
   LogOut,
   MapPin,
@@ -42,6 +45,8 @@ import {
   Settings,
   Share2,
   ShieldCheck,
+  Stethoscope,
+  Syringe,
   Trophy,
   UserRound,
   WifiOff,
@@ -80,6 +85,26 @@ interface NavigationStep {
 }
 
 type NoticeTone = "success" | "info" | "warning" | "error";
+type CareCategory = "emergency" | "hospital" | "clinic" | "ngo" | "rabies";
+interface CarePlace {
+  id: string;
+  category: CareCategory;
+  name: string;
+  address: string;
+  lat: number;
+  lng: number;
+  rating?: number;
+  ratingCount?: number;
+  googleMapsUri: string;
+  photos: Array<{ url: string; attribution: string }>;
+}
+const CARE_CATEGORIES: Array<{ id: CareCategory; label: string; short: string; query: string }> = [
+  { id: "emergency", label: "Emergency vets", short: "24h", query: "24 hour emergency veterinary animal ambulance near IILM University Greater Noida" },
+  { id: "hospital", label: "Pet hospitals", short: "+", query: "animal and pet hospital near IILM University Greater Noida" },
+  { id: "clinic", label: "Vet clinics", short: "V", query: "veterinary clinic near IILM University Greater Noida" },
+  { id: "ngo", label: "Rescue NGOs", short: "♥", query: "animal rescue NGO shelter near IILM University Greater Noida" },
+  { id: "rabies", label: "Rabies care", short: "Rx", query: "dog rabies vaccination centre near IILM University Greater Noida" },
+];
 
 function noticeTone(message: string): NoticeTone {
   if (
@@ -266,6 +291,7 @@ export default function App() {
   const map = useRef<google.maps.Map>();
   const renderer = useRef<google.maps.DirectionsRenderer>();
   const markers = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
+  const careMarkers = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
   const riskCircles = useRef<google.maps.Circle[]>([]);
   const locationMarker = useRef<google.maps.marker.AdvancedMarkerElement>();
   const accuracyCircle = useRef<google.maps.Circle>();
@@ -305,6 +331,16 @@ export default function App() {
   const [originPlacementMode, setOriginPlacementMode] = useState(false);
   const [safeRouting, setSafeRouting] = useState(true);
   const [demoPanelOpen, setDemoPanelOpen] = useState(false);
+  const [carePlaces, setCarePlaces] = useState<CarePlace[]>([]);
+  const [careFilters, setCareFilters] = useState<Set<CareCategory>>(
+    () => new Set(CARE_CATEGORIES.map((category) => category.id)),
+  );
+  const [selectedCare, setSelectedCare] = useState<CarePlace | null>(null);
+  const [serviceRouteTarget, setServiceRouteTarget] = useState<{
+    label: string;
+    lat: number;
+    lng: number;
+  } | null>(null);
 
   useEffect(() => {
     if (!notice) return;
@@ -628,6 +664,83 @@ export default function App() {
   }, [mapsReady, sightings, testMode, demoMode, manualSightings]);
 
   useEffect(() => {
+    if (!mapsReady || !demoMode) return;
+    let active = true;
+    void (async () => {
+      try {
+        const { Place } = (await google.maps.importLibrary("places")) as google.maps.PlacesLibrary;
+        const batches = await Promise.all(
+          CARE_CATEGORIES.map(async (category) => {
+            const { places } = await Place.searchByText({
+              textQuery: category.query,
+              fields: ["id", "displayName", "formattedAddress", "location", "rating", "userRatingCount", "googleMapsURI", "photos"],
+              locationBias: { center: { lat: 28.4589, lng: 77.4947 }, radius: 18_000 },
+              maxResultCount: 10,
+              region: "IN",
+              language: "en",
+            });
+            return places.flatMap((place): CarePlace[] => {
+              if (!place.id || !place.displayName || !place.location) return [];
+              return [{
+                id: place.id,
+                category: category.id,
+                name: place.displayName,
+                address: place.formattedAddress || "Greater Noida",
+                ...place.location.toJSON(),
+                rating: place.rating ?? undefined,
+                ratingCount: place.userRatingCount ?? undefined,
+                googleMapsUri: place.googleMapsURI || `https://www.google.com/maps/search/?api=1&query_place_id=${encodeURIComponent(place.id)}&query=${encodeURIComponent(place.displayName)}`,
+                photos: (place.photos || []).slice(0, 5).map((photo) => ({
+                  url: photo.getURI({ maxWidth: 900, maxHeight: 650 }),
+                  attribution: photo.authorAttributions.map((author) => author.displayName).filter(Boolean).join(", ") || "Google Maps contributor",
+                })),
+              }];
+            });
+          }),
+        );
+        // A provider can legitimately appear under multiple toggles (for
+        // example, a hospital that also provides rabies vaccination).
+        if (active) setCarePlaces(batches.flat().slice(0, 50));
+      } catch (error) {
+        console.error("demo-care-places", error);
+        if (active) setNotice("Nearby animal-care directory is temporarily unavailable.");
+      }
+    })();
+    return () => { active = false; };
+  }, [mapsReady, demoMode]);
+
+  useEffect(() => {
+    if (!mapsReady || !demoMode || !map.current) return;
+    const clear = () => {
+      careMarkers.current.forEach((marker) => (marker.map = null));
+      careMarkers.current = [];
+    };
+    const render = () => {
+      if (!map.current) return;
+      clear();
+      const bounds = map.current.getBounds();
+      if ((map.current.getZoom() || 5) < 12 || !bounds) return;
+      const visible = new Map<string, CarePlace>();
+      carePlaces
+        .filter((place) => careFilters.has(place.category) && bounds.contains({ lat: place.lat, lng: place.lng }))
+        .forEach((place) => { if (!visible.has(place.id)) visible.set(place.id, place); });
+      careMarkers.current = [...visible.values()]
+        .map((place) => {
+          const icon = document.createElement("button");
+          icon.className = `care-marker ${place.category}`;
+          icon.textContent = CARE_CATEGORIES.find((category) => category.id === place.category)?.short || "+";
+          icon.title = place.name;
+          icon.setAttribute("aria-label", `${place.name}, ${place.category}`);
+          icon.onclick = () => { setSelected(null); setSelectedCare(place); };
+          return new google.maps.marker.AdvancedMarkerElement({ map: map.current, position: { lat: place.lat, lng: place.lng }, content: icon, zIndex: 1_100 });
+        });
+    };
+    render();
+    const listener = map.current.addListener("idle", render);
+    return () => { listener.remove(); clear(); };
+  }, [mapsReady, demoMode, carePlaces, careFilters]);
+
+  useEffect(() => {
     if (
       !mapsReady ||
       !map.current ||
@@ -779,7 +892,7 @@ export default function App() {
     return <AuthorityPortal user={user} profile={profile} login={login} />;
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell${demoMode ? " demo-shell" : ""}`}>
       <div ref={mapNode} className="map" />
       {!import.meta.env.VITE_GOOGLE_MAPS_API_KEY && (
         <div className="setup-state">
@@ -951,6 +1064,30 @@ export default function App() {
           )}
         </>
       )}
+      {demoMode && (
+        <div className="care-filters" aria-label="Nearby animal care filters">
+          {CARE_CATEGORIES.map((category) => {
+            const Icon = category.id === "emergency" ? Ambulance : category.id === "hospital" ? Hospital : category.id === "clinic" ? Stethoscope : category.id === "ngo" ? HandHeart : Syringe;
+            return (
+              <button
+                key={category.id}
+                className={careFilters.has(category.id) ? "active" : ""}
+                onClick={() => setCareFilters((current) => {
+                  const next = new Set(current);
+                  if (next.has(category.id)) next.delete(category.id);
+                  else next.add(category.id);
+                  return next;
+                })}
+                aria-pressed={careFilters.has(category.id)}
+              >
+                <Icon size={13} />
+                <span>{category.label}</span>
+                <b>{carePlaces.filter((place) => place.category === category.id).length}</b>
+              </button>
+            );
+          })}
+        </div>
+      )}
       {testMode && <div className="demo-chip">Manual route testing</div>}
       {testMode && (
         <section className="demo-controls">
@@ -1093,7 +1230,7 @@ export default function App() {
           navigation ? "bottom-actions route-active" : "bottom-actions"
         }
       >
-        <button className="navigate-button" onClick={() => setRouteOpen(true)}>
+        <button className="navigate-button" onClick={() => { setServiceRouteTarget(null); setRouteOpen(true); }}>
           <Navigation size={22} fill="currentColor" />
           Navigate safely
         </button>
@@ -1120,11 +1257,12 @@ export default function App() {
           sightings={activeRisk}
           currentLocation={location}
           locate={locate}
-          close={() => setRouteOpen(false)}
+          close={() => { setRouteOpen(false); setServiceRouteTarget(null); }}
           setNotice={setNotice}
           setNavigation={setNavigation}
           safeRouting={safeRouting}
           demoMode={demoMode}
+          presetDestination={serviceRouteTarget}
           onRouteReady={(fn) => {
             reroute.current = fn;
           }}
@@ -1144,6 +1282,17 @@ export default function App() {
       )}
       {selected && (
         <HotspotCard hotspot={selected} close={() => setSelected(null)} />
+      )}
+      {selectedCare && (
+        <CarePlaceCard
+          place={selectedCare}
+          close={() => setSelectedCare(null)}
+          route={() => {
+            setServiceRouteTarget({ label: selectedCare.name, lat: selectedCare.lat, lng: selectedCare.lng });
+            setSelectedCare(null);
+            setRouteOpen(true);
+          }}
+        />
       )}
     </main>
   );
@@ -2392,6 +2541,7 @@ function RouteSheet({
   setNavigation,
   safeRouting,
   demoMode,
+  presetDestination,
   onRouteReady,
 }: {
   map?: google.maps.Map;
@@ -2404,9 +2554,11 @@ function RouteSheet({
   setNavigation: (v: NavigationInfo) => void;
   safeRouting: boolean;
   demoMode: boolean;
+  presetDestination: { label: string; lat: number; lng: number } | null;
   onRouteReady: (fn: (risks: Sighting[]) => Promise<void>) => void;
 }) {
   const destinationRef = useRef<HTMLInputElement>(null);
+  const presetStarted = useRef(false);
   const sessionToken = useRef<google.maps.places.AutocompleteSessionToken>();
   const [routing, setRouting] = useState(false);
   const [searchText, setSearchText] = useState("");
@@ -2662,6 +2814,16 @@ function RouteSheet({
       setRouting(false);
     }
   }
+  useEffect(() => {
+    if (!presetDestination || presetStarted.current) return;
+    presetStarted.current = true;
+    setSearchText(presetDestination.label);
+    void navigate(
+      new google.maps.LatLng(presetDestination.lat, presetDestination.lng),
+    );
+    // navigate intentionally uses the current route inputs captured on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetDestination]);
   return (
     <div className="scrim">
       <section className="sheet route-sheet">
@@ -3174,6 +3336,47 @@ function ReportSheet({
         </form>
       </section>
     </div>
+  );
+}
+
+function CarePlaceCard({
+  place,
+  close,
+  route,
+}: {
+  place: CarePlace;
+  close: () => void;
+  route: () => void;
+}) {
+  const [photoIndex, setPhotoIndex] = useState(0);
+  const photo = place.photos[photoIndex];
+  return (
+    <section className="sighting-card care-place-card">
+      <button className="card-close" onClick={close} aria-label="Close care details"><X size={17} /></button>
+      {photo ? (
+        <div className="care-photo">
+          <img src={photo.url} alt={place.name} />
+          <small>Photo: {photo.attribution}</small>
+          {place.photos.length > 1 && (
+            <div className="care-photo-dots">
+              {place.photos.map((_, index) => (
+                <button key={index} className={index === photoIndex ? "active" : ""} onClick={() => setPhotoIndex(index)} aria-label={`Show photo ${index + 1}`} />
+              ))}
+            </div>
+          )}
+        </div>
+      ) : <div className="care-photo-empty"><Hospital size={28} /></div>}
+      <div className="care-place-info">
+        <span>{CARE_CATEGORIES.find((category) => category.id === place.category)?.label}</span>
+        <h3>{place.name}</h3>
+        <p>{place.address}</p>
+        {place.rating && <small>★ {place.rating.toFixed(1)}{place.ratingCount ? ` · ${place.ratingCount} Google ratings` : ""}</small>}
+        <div className="care-place-actions">
+          <button onClick={route}><ShieldCheck size={15} /> Route safely</button>
+          <a href={place.googleMapsUri} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Google Maps</a>
+        </div>
+      </div>
+    </section>
   );
 }
 

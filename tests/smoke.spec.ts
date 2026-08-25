@@ -84,6 +84,52 @@ test("NCR scale demo is isolated and exposes judge route presets", async ({
   }
 });
 
+test("NCR demo exposes live animal-care categories and place details", async ({
+  page,
+  context,
+}, testInfo) => {
+  test.skip(
+    testInfo.project.name !== "desktop-chrome",
+    "one live Places API check is sufficient",
+  );
+  await context.setGeolocation({ latitude: 28.4589, longitude: 77.4947 });
+  await page.goto("/demo");
+
+  const filters = page.locator(".care-filters button");
+  await expect(filters).toHaveCount(5);
+  await expect(page.getByRole("button", { name: /Emergency vets/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Pet hospitals/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Vet clinics/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Rescue NGOs/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Rabies care/ })).toBeVisible();
+  await expect
+    .poll(async () =>
+      filters.locator("b").evaluateAll((counts) =>
+        counts.reduce((sum, count) => sum + Number(count.textContent), 0),
+      ), { timeout: 30_000 })
+    .toBeGreaterThanOrEqual(35);
+
+  const map = await page.locator(".map").boundingBox();
+  if (!map) throw new Error("Map bounds unavailable");
+  await page.mouse.move(map.x + map.width / 2, map.y + map.height / 2);
+  for (let step = 0; step < 4; step += 1) {
+    await page.mouse.wheel(0, 800);
+    await page.waitForTimeout(150);
+  }
+  await expect(page.locator(".care-marker").first()).toBeVisible({ timeout: 20_000 });
+  await page.locator(".care-marker").first().click({ force: true });
+  const card = page.locator(".care-place-card");
+  await expect(card).toBeVisible();
+  await expect(card.getByRole("heading")).not.toBeEmpty();
+  await expect(card.getByRole("button", { name: "Route safely" })).toBeVisible();
+  await expect(card.getByRole("link", { name: "Google Maps", exact: true }))
+    .toHaveAttribute("href", /(maps\.google\.com|google\.com\/maps)/);
+
+  const emergency = page.getByRole("button", { name: /Emergency vets/ });
+  await emergency.click();
+  await expect(emergency).toHaveAttribute("aria-pressed", "false");
+});
+
 test("NCR judge route demonstrably avoids the seeded danger corridor", async ({
   page,
   context,
