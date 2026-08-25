@@ -1,10 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 import { Camera, CheckCircle2, Cctv, MapPin, Pause, Play, Radio, ScanLine, X } from "lucide-react";
 
+const TRACK = [
+  [0, 26, 22, 32, 53], [0.5, 39, 22, 29, 54], [1, 33, 20, 34, 55],
+  [1.5, 30, 20, 35, 56], [2, 28, 19, 35, 57], [2.5, 25, 19, 35, 58],
+  [3, 33, 19, 34, 58], [3.5, 33, 18, 34, 59], [4, 31, 18, 35, 59],
+  [4.5, 33, 18, 35, 59], [5, 23, 18, 35, 59], [5.5, 35, 18, 34, 59],
+  [6, 34, 18, 34, 59], [6.5, 31, 20, 32, 58], [7, 47, 20, 28, 57],
+  [7.5, 28, 18, 35, 58], [8, 38, 17, 34, 59], [8.5, 31, 55, 46, 45],
+  [9, 27, 49, 52, 51], [10, 25, 45, 55, 55],
+] as const;
+
+function detectionBox(time: number) {
+  const nextIndex = TRACK.findIndex(([at]) => at >= time);
+  if (nextIndex <= 0) return TRACK[0].slice(1);
+  const before = TRACK[nextIndex - 1], after = TRACK[nextIndex];
+  const progress = (time - before[0]) / (after[0] - before[0]);
+  return before.slice(1).map((value, index) => value + (after[index + 1] - value) * progress);
+}
+
 export default function CctvDemo({ close }: { close: () => void }) {
   const video = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(true);
   const [seconds, setSeconds] = useState(0);
+  const [left, top, width, height] = detectionBox(seconds);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => event.key === "Escape" && close();
@@ -44,7 +63,7 @@ export default function CctvDemo({ close }: { close: () => void }) {
               <span>GREATER NOIDA · PUBLIC ROAD</span>
               <time>14:32:{String(Math.floor(seconds)).padStart(2, "0")} IST</time>
             </div>
-            <div className={`cctv-detection${playing ? " tracking" : ""}`}>
+            <div className="cctv-detection" style={{ left: `${left}%`, top: `${top}%`, width: `${width}%`, height: `${height}%` }}>
               <span>DOG · ID 01 <b>{Math.round(93 + (seconds % 3))}%</b></span>
               <i className="corner tl"/><i className="corner tr"/><i className="corner bl"/><i className="corner br"/>
             </div>
@@ -59,7 +78,7 @@ export default function CctvDemo({ close }: { close: () => void }) {
           <aside className="cctv-insights">
             <div className="cctv-live-label"><i /> AI ANALYTICS ACTIVE</div>
             <section className="cctv-metrics">
-              <article><small>ANIMALS DETECTED</small><strong>01</strong><span>Dog · Track stable</span></article>
+              <article><small>ANIMALS DETECTED</small><strong>01</strong><span>Dog · Track locked</span></article>
               <article><small>MODEL CONFIDENCE</small><strong>{Math.round(93 + (seconds % 3))}<em>%</em></strong><span>Above 85% threshold</span></article>
             </section>
             <section className="cctv-classification">
@@ -70,7 +89,7 @@ export default function CctvDemo({ close }: { close: () => void }) {
             </section>
             <section className="cctv-pipeline">
               <article className="done"><Camera /><div><strong>Camera signal received</strong><span>Privacy-first edge processing</span></div><CheckCircle2 /></article>
-              <article className="done"><ScanLine /><div><strong>Dog track confirmed</strong><span>12 consecutive frames</span></div><CheckCircle2 /></article>
+              <article className="done"><ScanLine /><div><strong>Dog track confirmed</strong><span>Track ID retained through occlusion</span></div><CheckCircle2 /></article>
               <article className="active"><MapPin /><div><strong>Map alert prepared</strong><span>Human verification before publish</span></div><i /></article>
             </section>
             <div className="cctv-future-note"><strong>Future integration vision</strong><span>Designed to connect consented public-camera feeds with Pawlytics safety maps.</span></div>
