@@ -173,11 +173,21 @@ textarea {
   inset: 0;
   background: #e9eeeb;
 }
-.ios-standalone .app-shell {
-  /* iOS can retain Safari's reduced toolbar viewport after Home Screen launch.
-     Use the physical standalone screen extent so the map reaches the bottom. */
-  bottom: auto;
-  height: var(--ios-standalone-height, 100lvh);
+@media (display-mode: standalone) {
+  html,
+  body,
+  #root {
+    width: 100vw;
+    height: 100lvh;
+    min-height: 100lvh;
+  }
+  .app-shell {
+    position: absolute;
+    width: 100vw;
+    height: 100lvh;
+    min-height: 100lvh;
+    inset: 0;
+  }
 }
 .immersive-fallback,
 .immersive-fallback body {

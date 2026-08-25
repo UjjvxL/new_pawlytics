@@ -357,32 +357,6 @@ export default function App() {
     return () => document.removeEventListener("fullscreenchange", syncFullscreen);
   }, []);
 
-  useEffect(() => {
-    const standalone =
-      window.matchMedia("(display-mode: standalone)").matches ||
-      Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
-    const isiPhone = /iPhone|iPod/.test(navigator.userAgent);
-    if (!standalone || !isiPhone) return;
-    const fitIPhoneScreen = () => {
-      const portrait = window.innerHeight >= window.innerWidth;
-      const fullHeight = portrait
-        ? Math.max(window.screen.width, window.screen.height)
-        : Math.min(window.screen.width, window.screen.height);
-      document.documentElement.style.setProperty(
-        "--ios-standalone-height",
-        `${Math.max(window.innerHeight, fullHeight)}px`,
-      );
-      document.documentElement.classList.add("ios-standalone");
-    };
-    fitIPhoneScreen();
-    window.addEventListener("resize", fitIPhoneScreen);
-    window.addEventListener("orientationchange", fitIPhoneScreen);
-    return () => {
-      window.removeEventListener("resize", fitIPhoneScreen);
-      window.removeEventListener("orientationchange", fitIPhoneScreen);
-    };
-  }, []);
-
   async function toggleFullscreen() {
     const root = appShell.current;
     if (!root) return;
