@@ -255,6 +255,7 @@ export default function App() {
   const [placementMode, setPlacementMode] = useState(false);
   const [originPlacementMode, setOriginPlacementMode] = useState(false);
   const [safeRouting, setSafeRouting] = useState(true);
+  const [demoPanelOpen, setDemoPanelOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -849,28 +850,48 @@ export default function App() {
         )}
       </div>
       {demoMode && (
-        <section className="scale-demo-panel">
-          <div>
-            <strong>LIVE NCR SCALE DEMO</strong>
-            <small>Verified simulation · production data isolated</small>
-          </div>
-          <label>
-            <span>Safe path</span>
-            <input
-              type="checkbox"
-              checked={safeRouting}
-              onChange={(event) => {
-                setSafeRouting(event.target.checked);
-                renderer.current?.set("directions", null);
-                setNavigation(null);
-              }}
-            />
-            <i />
-          </label>
-          <span className="density-key" title="Map display changes with zoom">
-            <i /> Density
-          </span>
-        </section>
+        <>
+          <button
+            className={
+              demoPanelOpen
+                ? "scale-demo-trigger active"
+                : "scale-demo-trigger"
+            }
+            onClick={() => setDemoPanelOpen((open) => !open)}
+            aria-label="NCR scale demo controls"
+            aria-expanded={demoPanelOpen}
+          >
+            <ShieldCheck size={17} />
+            <small>NCR</small>
+          </button>
+          {demoPanelOpen && (
+            <section className="scale-demo-panel">
+              <div>
+                <strong>LIVE NCR SCALE DEMO</strong>
+                <small>Isolated simulation</small>
+              </div>
+              <label>
+                <span>Safe path</span>
+                <input
+                  type="checkbox"
+                  checked={safeRouting}
+                  onChange={(event) => {
+                    setSafeRouting(event.target.checked);
+                    renderer.current?.set("directions", null);
+                    setNavigation(null);
+                  }}
+                />
+                <i />
+              </label>
+              <span
+                className="density-key"
+                title="Map display changes with zoom"
+              >
+                <i /> Density when zoomed out
+              </span>
+            </section>
+          )}
+        </>
       )}
       {testMode && <div className="demo-chip">Manual route testing</div>}
       {testMode && (

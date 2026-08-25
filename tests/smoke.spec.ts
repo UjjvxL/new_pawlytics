@@ -41,6 +41,14 @@ test("NCR scale demo is isolated and exposes judge route presets", async ({
 }) => {
   await page.goto("/demo");
 
+  const demoControl = page.getByRole("button", {
+    name: "NCR scale demo controls",
+  });
+  await expect(demoControl).toBeVisible();
+  const controlSize = await demoControl.boundingBox();
+  expect(controlSize?.width).toBeLessThanOrEqual(40);
+  expect(controlSize?.height).toBeLessThanOrEqual(40);
+  await demoControl.click();
   await expect(page.getByText("LIVE NCR SCALE DEMO")).toBeVisible();
   await expect(page.getByText(/480.*demo dogs/)).toBeVisible();
   await expect(page.getByText("Safe path", { exact: true })).toBeVisible();
@@ -110,7 +118,10 @@ test("NCR demo hides detailed dog markers when zoomed out", async ({
     await page.waitForTimeout(120);
   }
   await expect(page.locator(".dog-marker")).toHaveCount(0);
-  await expect(page.getByText("Density", { exact: true })).toBeVisible();
+  await page
+    .getByRole("button", { name: "NCR scale demo controls" })
+    .click();
+  await expect(page.getByText("Density when zoomed out")).toBeVisible();
 });
 
 test("Google map tiles and destination suggestions are operational", async ({
