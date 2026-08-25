@@ -14,6 +14,7 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret } from "firebase-functions/params";
 import { logger } from "firebase-functions";
 import sharp from "sharp";
+import tzLookup from "tz-lookup";
 import {
   extractImageMetadata,
   optionalNumber,
@@ -64,6 +65,13 @@ function validPoint(lat: number, lng: number) {
     lng >= -180 &&
     lng <= 180
   );
+}
+function timezoneAt(lat: number, lng: number) {
+  try {
+    return validPoint(lat, lng) ? tzLookup(lat, lng) : "UTC";
+  } catch {
+    return "UTC";
+  }
 }
 function sha(value: string) {
   return createHash("sha256").update(value).digest("hex");
@@ -134,6 +142,7 @@ function publicReport(
     reportId,
     lat: point.lat,
     lng: point.lng,
+    sightingTimezone: data.sightingTimezone || timezoneAt(data.lat, data.lng),
     description: data.aiSummary || "Verified community dog activity",
     severity: data.observedSeverity || data.severity,
     dogCount: Math.max(1, data.dogCount || 1),
@@ -509,6 +518,7 @@ export const createReportSession = onCall(
         jurisdictionId,
         lat,
         lng,
+        sightingTimezone: timezoneAt(lat, lng),
         description,
         severity,
         photoSource,

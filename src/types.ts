@@ -26,6 +26,7 @@ export interface Sighting {
   id: string;
   lat: number;
   lng: number;
+  sightingTimezone?: string;
   description: string;
   severity: Severity;
   dogCount?: number;

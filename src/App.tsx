@@ -94,6 +94,31 @@ function sightingDate(value: Sighting["createdAt"]) {
   return "toDate" in value ? value.toDate() : value;
 }
 
+function formatSightingTime(
+  value: Sighting["createdAt"],
+  timezone?: string,
+) {
+  const options: Intl.DateTimeFormatOptions = {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  };
+  if (timezone) options.timeZone = timezone;
+  try {
+    return new Intl.DateTimeFormat(undefined, options).format(
+      sightingDate(value),
+    );
+  } catch {
+    delete options.timeZone;
+    return new Intl.DateTimeFormat(undefined, options).format(
+      sightingDate(value),
+    );
+  }
+}
+
 function isActiveSighting(sighting: Sighting) {
   if (!sighting.expiresAt) return true;
   const expiresAt =
@@ -1370,7 +1395,7 @@ function ReviewPanel({
           <dd>
             {report.timeEvidence || "Pending"}
             {report.photoCapturedAt
-              ? ` · ${sightingDate(report.photoCapturedAt).toLocaleString()}`
+              ? ` · ${formatSightingTime(report.photoCapturedAt, report.sightingTimezone)}`
               : ""}
           </dd>
         </div>
@@ -2973,7 +2998,9 @@ function HotspotCard({
           <dl>
             <div>
               <dt>Reported</dt>
-              <dd>{sightingDate(report.createdAt).toLocaleString()}</dd>
+              <dd>
+                {formatSightingTime(report.createdAt, report.sightingTimezone)}
+              </dd>
             </div>
             <div>
               <dt>Location</dt>
@@ -3131,7 +3158,7 @@ function ReportsPanel({
                 })}
               </ol>
               <small>
-                {sightingDate(r.createdAt).toLocaleString()} ·{" "}
+                {formatSightingTime(r.createdAt, r.sightingTimezone)} ·{" "}
                 {r.lat?.toFixed(4)}, {r.lng?.toFixed(4)}
                 {r.pointsAwarded ? ` · +${r.pointsAwarded} points` : ""}
               </small>

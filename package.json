@@ -15,6 +15,7 @@
     "test:rules": "firebase emulators:exec --only firestore,storage \"node --test tests/firebase-rules.test.mjs\"",
     "grant:authority": "node scripts/grant-authority-access.mjs",
     "attach:sighting-images": "node scripts/attach-public-sighting-images.mjs",
+    "backfill:timezones": "node scripts/backfill-sighting-timezones.mjs",
     "preview": "vite preview",
     "emulators": "firebase emulators:start",
     "deploy:functions": "firebase deploy --only functions"
