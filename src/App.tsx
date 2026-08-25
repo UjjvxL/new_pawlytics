@@ -26,6 +26,7 @@ import {
   AlertTriangle,
   Ambulance,
   ArrowLeft,
+  BarChart3,
   Bell,
   Camera,
   CircleCheck,
@@ -65,6 +66,7 @@ import {
 } from "./firebase";
 import type { Severity, Sighting, UserProfile } from "./types";
 import PawLogo from "./PawLogo";
+import DemoAuthorityPortal from "./DemoAuthorityPortal";
 import {
   DEFAULT_DEMO_SIGHTINGS,
   DEFAULT_DEMO_REVIEWS,
@@ -937,6 +939,8 @@ export default function App() {
     [sightings, testMode, demoMode, manualSightings],
   );
 
+  if (window.location.pathname.startsWith("/demo/authority"))
+    return <DemoAuthorityPortal />;
   if (window.location.pathname.startsWith("/authority"))
     return <AuthorityPortal user={user} profile={profile} login={login} />;
 
@@ -1136,6 +1140,9 @@ export default function App() {
               >
                 <i /> Density when zoomed out
               </span>
+              <a className="demo-authority-link" href="/demo/authority">
+                <BarChart3 size={13} /> Open authority command
+              </a>
             </section>
           )}
         </>

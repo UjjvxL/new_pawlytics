@@ -291,6 +291,39 @@ test("authority URL renders its own authentication surface", async ({
   ).toHaveAttribute("href", "/");
 });
 
+test("NCR authority demo connects command, district, incident, ABC and care operations", async ({ page }, testInfo) => {
+  await page.goto("/demo/authority");
+  await expect(page.getByText("NCR Unified Command")).toBeVisible();
+  await expect(page.getByText("Simulated data")).toBeVisible();
+  await expect(page.getByText("225,000")).toBeVisible();
+  if (testInfo.project.name === "desktop-chrome") {
+    const admin = page.locator(".da-sidebar footer select");
+    await expect(admin.locator("option")).toHaveCount(2);
+    await admin.selectOption({ label: "ujjvalxix19@gmail.com" });
+    await expect(admin).toHaveValue("ujjvalxix19@gmail.com");
+  }
+
+  await page.getByRole("button", { name: /Bites & incidents/ }).click();
+  await expect(page.getByText("Unified incident register")).toBeVisible();
+  await page.getByRole("button", { name: /INC-2841/ }).click();
+  await expect(page.getByText("AI evidence fusion · 96%")).toBeVisible();
+  await page.getByRole("button", { name: "Dispatch nearest team" }).click();
+  await expect(page.getByText(/Nearest response team dispatched/)).toBeVisible();
+
+  await page.getByRole("button", { name: "ABC & rabies" }).click();
+  await expect(page.getByText("ABC traceability pipeline")).toBeVisible();
+  await expect(page.getByText("ARV stock intelligence")).toBeVisible();
+  await page.getByRole("button", { name: "Care network" }).click();
+  await expect(page.getByText("Nearest-care orchestration")).toBeVisible();
+  await expect(page.getByText("Sharda Hospital ARV Centre")).toBeVisible();
+
+  const dimensions = await page.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+  }));
+  expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth + 1);
+});
+
 test("legacy service workers are removed and repeated reloads remain usable", async ({
   page,
 }) => {
