@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Loader } from "@googlemaps/js-api-loader";
+import { computeWalkingRoutes, WalkingRouteRenderer } from "./routes";
 import { Crosshair, Navigation, Search, X } from "lucide-react";
 
 const FALLBACK_LOCATION = { lat: 28.4589, lng: 77.4947 };
@@ -8,7 +9,7 @@ type Destination = { name: string; lat: number; lng: number };
 export default function WatchDemo() {
   const mapNode = useRef<HTMLDivElement>(null);
   const map = useRef<google.maps.Map>();
-  const renderer = useRef<google.maps.DirectionsRenderer>();
+  const renderer = useRef<WalkingRouteRenderer>();
   const [origin, setOrigin] = useState(FALLBACK_LOCATION);
   const [query, setQuery] = useState("");
   const [destination, setDestination] = useState<Destination | null>(null);
@@ -23,12 +24,9 @@ export default function WatchDemo() {
       if (!active || !mapNode.current) return;
       map.current = new google.maps.Map(mapNode.current, {
         center: FALLBACK_LOCATION, zoom: 15, disableDefaultUI: true,
-        clickableIcons: false, gestureHandling: "greedy",
-        styles: [{ featureType: "poi.business", stylers: [{ visibility: "off" }] }],
+        clickableIcons: false, gestureHandling: "greedy", mapId: "DEMO_MAP_ID",
       });
-      renderer.current = new google.maps.DirectionsRenderer({
-        map: map.current, polylineOptions: { strokeColor: "#136f63", strokeWeight: 6 },
-      });
+      renderer.current = new WalkingRouteRenderer(map.current);
     }).catch(() => setStatus("Map unavailable"));
     return () => { active = false; };
   }, []);
@@ -56,8 +54,8 @@ export default function WatchDemo() {
       const place = geocoded.results[0];
       if (!place) throw new Error("No destination");
       const next = { name: place.formatted_address.split(",")[0], lat: place.geometry.location.lat(), lng: place.geometry.location.lng() };
-      const result = await new google.maps.DirectionsService().route({ origin, destination: { lat: next.lat, lng: next.lng }, travelMode: google.maps.TravelMode.WALKING });
-      renderer.current?.setDirections(result); setDestination(next);
+      const result = await computeWalkingRoutes({ origin, destination: { lat: next.lat, lng: next.lng } });
+      await renderer.current?.show(result.routes[0]); setDestination(next);
       const leg = result.routes[0]?.legs[0];
       setStatus(leg ? `${leg.duration?.text} · ${leg.distance?.text}` : "Route ready");
     } catch { setStatus("Place not found"); }
@@ -65,7 +63,7 @@ export default function WatchDemo() {
   }
 
   function clearRoute() {
-    setQuery(""); setDestination(null); setStatus(""); renderer.current?.set("directions", null);
+    setQuery(""); setDestination(null); setStatus(""); renderer.current?.clear();
   }
 
   return <main className="watch-stage"><section className="watch-case" aria-label="Pawlytics Watch map">

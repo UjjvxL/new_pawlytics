@@ -1,8 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { projectId, bucket } from "./project-config.mjs";
 
-const projectId = "pawlytics-506516";
-const bucket = "pawlytics-506516.firebasestorage.app";
 const assignments = process.argv.slice(2).map((argument) => {
   const separator = argument.indexOf("=");
   if (separator < 1) throw new Error("Each assignment must be reportId=/image/path");

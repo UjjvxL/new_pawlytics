@@ -361,7 +361,7 @@ test("NCR authority demo connects command, district, incident, ABC and care oper
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth + 1);
 });
 
-test("watch demo is fullscreen at watch size and supports core safety actions", async ({ page, context }, testInfo) => {
+test("watch demo fits watch size and calculates and clears a walking route", async ({ page, context }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome", "one watch-sized interaction pass is sufficient");
   await page.setViewportSize({ width: 198, height: 242 });
   await context.setGeolocation({ latitude: 28.4589, longitude: 77.4947 });
@@ -371,18 +371,18 @@ test("watch demo is fullscreen at watch size and supports core safety actions", 
   const bounds = await watch.boundingBox();
   expect(bounds?.width).toBe(198);
   expect(bounds?.height).toBe(242);
-  await expect(page.getByText("Low risk")).toBeVisible();
-
-  await page.getByRole("button", { name: /Start safe walk/ }).click();
-  await page.getByRole("button", { name: /KP II Metro/ }).click();
+  await expect(page.locator(".watch-map .gm-style")).toBeVisible();
+  await page.getByRole("button", { name: "Navigate safely" }).click();
+  const search = page.getByRole("textbox", { name: "Search destination" });
+  await expect(search).toBeFocused();
+  await search.fill("Knowledge Park II Metro, Greater Noida");
+  await search.press("Enter");
   await expect(page.getByRole("link", { name: "Start route" })).toHaveAttribute("href", /google\.com\/maps\/dir/);
-  await page.getByRole("button", { name: "Back to watch home" }).click();
-  await page.getByRole("button", { name: "Spot dog" }).click();
-  await page.getByRole("button", { name: "Confirm sighting" }).click();
-  await expect(page.getByText("Alert sent")).toBeVisible();
-  await page.getByRole("button", { name: "Back to watch home" }).click();
-  await page.getByRole("button", { name: /Bite help/ }).click();
-  await expect(page.getByRole("link", { name: "Call 112" })).toHaveAttribute("href", "tel:112");
+  await expect(page.locator(".watch-map-route small")).toContainText(/km|m/);
+  await page.getByRole("button", { name: "Clear destination" }).click();
+  await expect(search).toHaveValue("");
+  await expect(page.getByRole("link", { name: "Start route" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Navigate safely" })).toBeVisible();
 });
 
 test("legacy service workers are removed and repeated reloads remain usable", async ({

@@ -9,9 +9,8 @@ import {
 import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
 import { getBytes, ref, uploadBytes } from "firebase/storage";
 
-// Keep the configured project ID so Storage's cross-service Firestore lookup
-// resolves the same emulated database as the seeded report document.
-const projectId = "pawlytics-506516";
+// The CLI and both emulators use the same isolated demo project.
+const projectId = "demo-pawlytics";
 let environment;
 
 before(async () => {

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader } from "@googlemaps/js-api-loader";
+import { computeWalkingRoutes, WalkingRouteRenderer, type WalkingRoute, type WalkingRoutesResult } from "./routes";
 import {
   collection,
   doc,
@@ -296,7 +297,7 @@ function distanceToSegment(
   return Math.hypot(x - (x1 + t * dx), y - (y1 + t * dy)) * 111_000;
 }
 
-function routeRisk(route: google.maps.DirectionsRoute, sightings: Sighting[]) {
+function routeRisk(route: WalkingRoute, sightings: Sighting[]) {
   const path = route.overview_path.map((p) => p.toJSON());
   return sightings.reduce((score, sighting) => {
     const point = { lat: sighting.lat, lng: sighting.lng };
@@ -321,7 +322,7 @@ export default function App() {
   const appShell = useRef<HTMLElement>(null);
   const mapNode = useRef<HTMLDivElement>(null);
   const map = useRef<google.maps.Map>();
-  const renderer = useRef<google.maps.DirectionsRenderer>();
+  const renderer = useRef<WalkingRouteRenderer>();
   const markers = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
   const careMarkers = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
   const riskCircles = useRef<google.maps.Circle[]>([]);
@@ -527,14 +528,13 @@ export default function App() {
         const liveSightings = snap.docs.map(
           (d) => ({ id: d.id, ...d.data() }) as Sighting,
         );
-        setSightings(
-          liveSightings.length > 0 ? liveSightings : DEFAULT_DEMO_SIGHTINGS,
-        );
+        setSightings(liveSightings);
         setSightingsReady(true);
       },
       () => {
-        setSightings(DEFAULT_DEMO_SIGHTINGS);
+        setSightings([]);
         setSightingsReady(true);
+        setNotice("Live sightings are unavailable. Try again when your connection is restored.");
       },
     );
   }, [demoMode]);
@@ -560,11 +560,7 @@ export default function App() {
             { featureType: "poi.business", stylers: [{ visibility: "off" }] },
           ],
         });
-        renderer.current = new google.maps.DirectionsRenderer({
-          map: map.current,
-          suppressMarkers: false,
-          polylineOptions: { strokeColor: "#136f63", strokeWeight: 6 },
-        });
+        renderer.current = new WalkingRouteRenderer(map.current);
         setMapsReady(true);
       })
       .catch(() => {
@@ -856,7 +852,7 @@ export default function App() {
               });
           } else locationMarker.current.position = point;
           setOriginPlacementMode(false);
-          renderer.current?.set("directions", null);
+          renderer.current?.clear();
           setNavigation(null);
           setNotice(
             "Test start location set. It will be used for routes and test reports.",
@@ -880,7 +876,7 @@ export default function App() {
           );
           void reroute.current([...sightings, ...nextManual]);
         } else {
-          renderer.current?.set("directions", null);
+          renderer.current?.clear();
           setNavigation(null);
           setNotice("Test dog zone placed. Calculate a route to include it.");
         }
@@ -1194,7 +1190,7 @@ export default function App() {
                   checked={safeRouting}
                   onChange={(event) => {
                     setSafeRouting(event.target.checked);
-                    renderer.current?.set("directions", null);
+                    renderer.current?.clear();
                     setNavigation(null);
                   }}
                 />
@@ -1271,7 +1267,7 @@ export default function App() {
               checked={safeRouting}
               onChange={(e) => {
                 setSafeRouting(e.target.checked);
-                renderer.current?.set("directions", null);
+                renderer.current?.clear();
                 setNavigation(null);
                 setNotice(
                   e.target.checked
@@ -1287,7 +1283,7 @@ export default function App() {
             disabled={!manualSightings.length}
             onClick={() => {
               setManualSightings([]);
-              renderer.current?.set("directions", null);
+              renderer.current?.clear();
               setNavigation(null);
             }}
           >
@@ -1317,7 +1313,7 @@ export default function App() {
           <button
             className="card-close"
             onClick={() => {
-              renderer.current?.set("directions", null);
+              renderer.current?.clear();
               setNavigation(null);
               setNavigationActive(false);
               setStepsOpen(false);
@@ -2697,7 +2693,7 @@ function RouteSheet({
   onRouteReady,
 }: {
   map?: google.maps.Map;
-  renderer?: google.maps.DirectionsRenderer;
+  renderer?: WalkingRouteRenderer;
   sightings: Sighting[];
   currentLocation: google.maps.LatLngLiteral | null;
   locate: () => Promise<google.maps.LatLngLiteral>;
@@ -2789,15 +2785,14 @@ function RouteSheet({
     setRouting(true);
     try {
       const origin = currentLocation || (await locate());
-      const service = new google.maps.DirectionsService();
+      const service = { route: computeWalkingRoutes };
       const result = await service.route({
         origin,
         destination,
-        travelMode: google.maps.TravelMode.WALKING,
         provideRouteAlternatives: true,
       });
       type Candidate = {
-        result: google.maps.DirectionsResult;
+        result: WalkingRoutesResult;
         i: number;
         score: number;
         seconds: number;
@@ -2846,7 +2841,6 @@ function RouteSheet({
             return service.route({
               origin,
               destination,
-              travelMode: google.maps.TravelMode.WALKING,
               provideRouteAlternatives: false,
               waypoints: [{ location: point, stopover: false }],
             });
@@ -2862,7 +2856,6 @@ function RouteSheet({
                 return service.route({
                   origin,
                   destination,
-                  travelMode: google.maps.TravelMode.WALKING,
                   provideRouteAlternatives: false,
                   waypoints: [
                     {
@@ -2904,8 +2897,7 @@ function RouteSheet({
             (a, b) => a.score - b.score || a.seconds - b.seconds,
           )[0]
         : candidates[0];
-      renderer?.setDirections(chosen.result);
-      renderer?.setRouteIndex(chosen.i);
+      await renderer?.show(chosen.result.routes[chosen.i]);
       const leg = chosen.result.routes[chosen.i].legs[0];
       const avoidedRisk = safeRouting
         ? Math.max(0, baselineRisk - chosen.score)
@@ -2933,7 +2925,7 @@ function RouteSheet({
       setNavigation({
         duration: leg.duration?.text || "—",
         distance: leg.distance?.text || "—",
-        destination: leg.end_address,
+        destination: presetDestination?.label || searchText || leg.end_address,
         risk: chosen.score,
         avoidedRisk,
         safetyEnabled: safeRouting,

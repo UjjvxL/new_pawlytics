@@ -5,14 +5,15 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import { chromium } from "@playwright/test";
+import { projectId, region, bucket, hostingUrl, env as projectEnv } from "./project-config.mjs";
 
 if (process.env.LIVE_SMOKE !== "1") {
   throw new Error("Refusing to touch the live project without LIVE_SMOKE=1");
 }
 
-const projectId = "pawlytics-506516";
-const region = "asia-south1";
-const bucket = "pawlytics-506516.firebasestorage.app";
+if (!process.env.LIVE_SMOKE_UID) {
+  throw new Error("Set LIVE_SMOKE_UID to the Firebase UID of your test account in the configured project.");
+}
 const terminal = new Set([
   "provisional",
   "confirmed",
@@ -39,19 +40,6 @@ function gpsDegrees(value) {
 
 function exifDate(value) {
   return value.toISOString().slice(0, 19).replace(/-/g, ":").replace("T", " ");
-}
-
-function parseEnv(source) {
-  return Object.fromEntries(
-    source
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith("#") && line.includes("="))
-      .map((line) => {
-        const index = line.indexOf("=");
-        return [line.slice(0, index), line.slice(index + 1)];
-      }),
-  );
 }
 
 async function jsonFetch(url, init = {}) {
@@ -96,7 +84,7 @@ async function googleAccessToken(cli) {
 
 async function firebaseTestIdentity(firebaseApiKey, googleToken) {
   const serviceAccount =
-    "firebase-adminsdk-fbsvc@pawlytics-506516.iam.gserviceaccount.com";
+    process.env.LIVE_SMOKE_SERVICE_ACCOUNT || `firebase-adminsdk-fbsvc@${projectId}.iam.gserviceaccount.com`;
   const now = Math.floor(Date.now() / 1000);
   const encode = (input) =>
     Buffer.from(JSON.stringify(input)).toString("base64url");
@@ -107,7 +95,7 @@ async function firebaseTestIdentity(firebaseApiKey, googleToken) {
       aud: "https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit",
       iat: now,
       exp: now + 3600,
-      uid: process.env.LIVE_SMOKE_UID || "KgURcVoHp0RzByxnmnexFGYep7h2",
+      uid: process.env.LIVE_SMOKE_UID,
       claims: { platformAdmin: true, liveSmoke: purpose },
     })}`;
   const backendUnsigned = unsigned("backend"),
@@ -227,7 +215,7 @@ async function runBrowserSubmission(
     }
   });
   try {
-    await page.goto("https://pawlytics-506516.web.app/test");
+    await page.goto(`${hostingUrl}/test`);
     await page.evaluate(
       async ({ token, config }) => {
         const [{ initializeApp }, authSdk] = await Promise.all([
@@ -328,7 +316,7 @@ function fields(document) {
 }
 
 async function main() {
-  const env = parseEnv(await readFile(".env", "utf8"));
+  const env = projectEnv;
   const firebaseApiKey = env.VITE_FIREBASE_API_KEY;
   assert.ok(firebaseApiKey, "Firebase web API key is missing");
 

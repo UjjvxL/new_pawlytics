@@ -947,7 +947,9 @@ async function verifyReport(reportId: string) {
       error: String(error),
     });
   }
-  const gemini = new GoogleGenerativeAI(geminiApiKey.value()),
+  const apiKey = geminiApiKey.value(),
+    vertexExpress = apiKey.startsWith("AQ."),
+    gemini = new GoogleGenerativeAI(apiKey),
     modelNames = [
       "gemini-3.6-flash",
       "gemini-3.5-flash",
@@ -1018,10 +1020,13 @@ async function verifyReport(reportId: string) {
     let parsed: Record<string, unknown> | undefined;
     for (let attempt = 1; attempt <= modelNames.length; attempt++) {
       const modelName = modelNames[attempt - 1],
-        model = gemini.getGenerativeModel({
-          model: modelName,
-          generationConfig,
-        });
+        model = gemini.getGenerativeModel(
+          {
+            model: vertexExpress ? `publishers/google/models/${modelName}` : modelName,
+            generationConfig,
+          },
+          vertexExpress ? { baseUrl: "https://aiplatform.googleapis.com", apiVersion: "v1" } : undefined,
+        );
       try {
         await ref.update({ aiAttempt: attempt, aiModelAttempted: modelName });
         const result = await withTimeout(

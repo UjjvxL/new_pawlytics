@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
+import { projectId } from "./project-config.mjs";
 
-const projectId = "pawlytics-506516";
 const rootRequire = createRequire(import.meta.url);
 const functionsRequire = createRequire(
   new URL("../functions/package.json", import.meta.url),

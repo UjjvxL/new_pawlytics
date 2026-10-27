@@ -2,6 +2,7 @@ node_modules
 dist
 .env
 .env.local
+.setup.local.mjs
 functions/.secret.local
 functions/.gemini-secret
 functions/lib
