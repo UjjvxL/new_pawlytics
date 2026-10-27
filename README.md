@@ -107,38 +107,47 @@ Starting the frontend does not deploy the backend; real report verification need
 
 ## Safety notes before public launch
 
-Gemini verification is a moderation signal, not proof that a report is genuine or a route is safe. Rate limits, duplicate detection, reporter trust, privacy controls, expiry, and human review are implemented. Before an open public launch, configure a reCAPTCHA Enterprise site key and enable Firebase App Check enforcement, raise Gemini production quota, add monitoring/alerts and backups, and complete legal/privacy review. Do not market routes as guaranteed safe.
+Gemini verification is a moderation signal, not proof that a report is genuine or a route is safe. Rate limits, exact-image duplicate detection, reporter trust, privacy controls, expiry, and human review are implemented. Before an open public launch, configure a reCAPTCHA Enterprise site key and enable Firebase App Check enforcement, raise Gemini production quota, add monitoring/alerts and backups, and complete legal/privacy review. Do not market routes as guaranteed safe.
 
-## Reference-site feature comparison
+## Deployment audit and feature comparison
 
-The reference is `https://pawlytics-506516.web.app/`; this repository deploys to `https://pawlytics-84071.web.app/`. The comparison covered anonymous desktop and phone flows, both deployed browser bundles, and the existing repository's authenticated flows. Existing reference users, reports, private evidence, and authority memberships are not migrated.
+Reference: <https://pawlytics-506516.web.app/>. New deployment: <https://pawlytics-84071.web.app/?ready=1>. Anonymous public pages were inspected in real Chrome at desktop and phone sizes, and compared with their deployed bundles, repository history, routes, components and callable services. The generic web fetcher could not render either app; browser access worked. The original project's protected Cloud Functions source returned permission denied, so its UI/presentation is not proof that its server features work. Original users, reports and private evidence were not copied.
 
-| Reference feature | Status in this repository |
-| --- | --- |
-| Live dog-sighting map, grouped risk zones, photo cards and fullscreen | Present; live empty states stay empty rather than showing sample reports |
-| Current location, destination suggestions, walking alternatives and hotspot avoidance | Present; migrated to the supported Routes API for the new project |
-| Nearby emergency vets, hospitals, clinics, rescue NGOs and rabies care on the main map | Restored outside demo mode, with location bias, short session caching and per-category Google Maps fallback links |
-| Place photos, ratings, addresses, phone calls and route handoff | Present, now reachable from the main map |
-| OpenStreetMap when Google Maps fails or reaches quota | Restored; live sightings and care links remain available, with an explicit external walking-directions handoff |
-| Google sign-in, private citizen profiles, optional phone verification and privacy controls | Present; new-project Google and Phone providers configured |
-| Camera/library evidence, multilingual speech, original metadata and upload stages | Present |
-| Server-side Gemini verification, duplicate/rate checks, review and sanitized thumbnails | Present; the configured Vertex express-mode key is supported |
-| Report notifications, history, AI explanations, map links and downloadable receipts | Present |
-| Impact points, trust tier, streaks, reward eligibility and incentive demo accounts | Present; demo rewards remain client-only and labelled |
-| Account export and delayed deletion/cancellation | Present |
-| Bite first aid, dog-approach guidance, rabies-care handoff and WHO reference | Present |
-| Authority invitations, organization/role access, review decisions and evidence | Present; empty live queues never substitute demo evidence |
-| Authority MFA enrollment and second-factor sign-in | Restored with Firebase SMS enrollment/challenge UI, server checks and Firestore enforcement |
-| Authority actions, team management and reviewed configuration changes | Present |
-| NCR demonstration: 480 dogs, 96 hotspots, route presets and density rendering | Present at `/demo` |
-| NCR command center, district performance, incident queue, ABC/rabies and care network | Present at `/demo/authority` |
-| CCTV concept video, tracking overlay, metrics and playback controls | Present; explicitly simulated |
-| Watch risk overview, walking presets, sighting confirmation, share and SOS | Restored at `/demo/watch`; demo sightings are explicitly local simulations |
-| Watch map, destination search and real walking directions | Retained at `/demo/watch/map` |
-| Manual dog placement, start positioning and safe-routing comparison | Present at `/test` |
+This repository uses React 18, Vite, TypeScript, CSS and Firebase Auth/Firestore/Storage/Functions. There is no active Supabase or Tailwind integration to migrate. No repository AGENTS.md was found; the supplied physical-iPad instructions do not apply to these browser tests. Environment inputs are documented in `.env.example`; `.env.local`, `.setup.local.mjs` and `functions/.secret.local` are ignored. Gemini credentials remain in Secret Manager and server code.
 
-Authority MFA uses the Firebase-verified second-factor claim. Enrollment alone or an administrative custom claim does not authorize protected evidence. Real SMS delivery requires the account owner's phone and verification code; automated tests never send SMS.
+**Working** means an implemented flow with the verification described below; **partial** means a specific limitation remains; **missing** means no real implementation existed; **unverifiable** means the required live evidence was unavailable. Presentation fixtures are never classified as live implementation.
+
+| Capability | New app before this work | Current status and verification |
+| --- | --- | --- |
+| Citizen photo, GPS, timestamp, category and severity | Partial: secure image flow existed; category and explicit observation time were absent | Working in code/integration tests: ReportSheet → createReportSession → uploadReportEvidence → prepareReportVerification → Firestore trigger. Category/time validated by server, observed time stored separately from server/EXIF time; private originals retained. Emulator tests create actual sessions; a temporary isolated production image exercised Storage/Firestore/Gemini. Physical camera and real-device GPS permission remain unverifiable; browser tests use emulated GPS. |
+| Hindi, English and Marathi voice | Partial: Web Speech UI existed, lifecycle/preserving typed text needed work | Partial: all three language selectors/transcription handlers tested with a browser speech stub; microphone cleanup and typed-text retention added. Actual microphone recognition and language availability depend on the browser/OS and were not verified on physical hardware. Unsupported/denied speech gives visible feedback and typing remains usable. |
+| Metadata/image validation, duplicates, trust/moderation | Partial: real checks existed but admin test mode could fabricate an AI fallback result | Working: byte signatures, Apple/Android EXIF/XMP, location/time mismatch, exact-image hashes, trust/rate restrictions, review cases and human decisions traced in Functions. Policy/unit tests cover malformed evidence, mismatch, stale photos and high-risk escalation. AI failure now creates human review, including tests; no fabricated verification. AI remains a probabilistic signal; cryptographic identity or image authenticity is not claimed. |
+| Explainable hotspots and time-sensitive risk | Partial: groups/expiry existed, but an open map could retain expired reports until the next snapshot | Working: active sightings refresh each minute; walking scores use severity × bounded dog count × six-hour age decay, with expiry exclusion. Hotspot cards explain evidence and limits. Ward aggregates use the same weights and only active public reports; unit and callable tests check decay/expiry. Public location is fuzzed; it is not raw evidence GPS. |
+| Safer routes and nearby care / rabies first aid | Partial: legacy Directions API failed on new project; care directory hidden outside demo; no quota fallback | Working: supported Routes API, scored alternatives/detours, route handoff and all five care categories on the main map. Browser tests exercise real routes and place lookup. Per-category external search and OSM map remain usable when Google Maps fails. Provider availability/opening hours and route safety are not guaranteed. First-aid content links WHO; no clinical treatment or vaccine availability is asserted. |
+| Authority review, ward risk, ABC/ARV records and PDF | Partial: protected reviews/actions/team existed; ward/ABC/ARV were presentation-only; export was JSON | Working implementation: `/authority/live` uses invitation/role/MFA access, original-evidence preview, reasoned review and ward assignment. New server transactions persist ordered ABC lifecycle stages, nonnegative ARV stock movements, idempotency and audit logs. Callable emulator tests verify role/org/MFA denial, database persistence, retries and balances; rule tests forbid anonymous/cross-org/direct writes. Live ward/operations PDF and clearly labelled sample PDF are real downloads, verified by `%PDF-` bytes. No hospital/FHIR feed, 112 dispatch integration, automatic clinical verification or official municipal data connection exists. |
+| Firebase authentication, live updates and private evidence | Partial: Google auth/live data worked; authority MFA UI/server enforcement incomplete | Working Google login and deployed private-data rules; emulator tests verify ownership/org/MFA and upload authorization. Live updates use Firestore listeners. SMS enrollment/challenge UI and backend/rule checks are implemented; actual SMS delivery and an owner-completed MFA sign-in remain unverifiable. Raw evidence is private; public thumbnails require opt-in and privacy checks and remove metadata. |
+
+### Presentation without login
+
+- `/authority` and `/demo/authority`: public command center, district/ward risk, incidents, ABC/rabies and care-network sample screens. A persistent banner labels sample data. Dispatch only simulates a local UI action and explicitly contacts no team. Operational-map and care-direction controls are real links; PDF export creates an actual labelled sample PDF.
+- `/demo`: NCR sample sightings, hotspot rendering, care discovery, route presets, local reporting and CCTV concept. `/demo?report=1` opens a photo/voice/category/time draft. A sample photo is available; saving stores only draft metadata in tab storage, uploads no evidence and claims no verification.
+- `/demo/watch`: watch presentation with walking presets, sharing, local demo sighting and SOS. `/demo/watch/map` retains the interactive map. These are web companions, not native watchOS apps.
+- `/authority/live`: private staff dashboard. An active organization membership and the configured second factor are required. No sample evidence is substituted into an empty real queue.
+
+### Backend records and verification
+
+`getAuthorityOperations` reads authorized organization records and active public sightings. `recordAuthorityOperation` writes `organizations/{org}/abcAnimals`, `arvStock` and immutable `operations` events with an audit log. ABC stages progress captured → vet cleared → sterilized → vaccinated → recovery → released; stock receipts/administered/wasted movements reject negative balance. Recording documents completed work; it does not perform a clinical action. Analytics cap at 1,000 reports, animal/stock views at 300 each, recent events at 50. Scale beyond these pilot limits requires pagination/aggregation. Existing organization security rules already deny all client writes and require authorized/MFA reads, so no SQL migration or broader access policy was added.
+
+Validated on 2026-10-27: `npm run typecheck`, `npm run build` and `npm test` passed: 15 Functions unit tests, 8 security-rule tests, 5 callable integration tests and 55 browser tests (11 intentional viewport-specific skips).
+
+Run `npm run typecheck`, `npm run build` and `npm test`. The test command includes lint, Functions unit tests, Firestore/Storage rules, Auth/Functions/Firestore/Storage callable integration tests and desktop/phone-sized browser tests. Emulators use isolated `demo-pawlytics`; no production auth tokens or SMS are used. Phone-sized tests run Chrome emulation, not physical Safari. Speech tests stub recognition and do not establish actual microphone quality.
+
+### Cloud configuration and remaining owner actions
+
+The new project's Firebase providers/domains, Mumbai database/storage, rules/indexes, Gemini secret, supported Maps services/restrictions, production Functions and Hosting are configured. A project operations workspace is configured as the pilot; `ujjvalxix19@gmail.com` has a verified-account, active `org_admin` membership. This is project authorization, not a claim of government affiliation. The owner still needs to enroll and verify their own phone MFA at `/authority/live`; no one can supply that personal verification on their behalf. No onboarding terms/age consent was accepted for the owner.
+
+Presentation routes need no login or further setup. Normal signed-in citizen contribution still requires the user's own profile/consent completion. The optional App Check enterprise site key remains unset and enforcement is disabled as in the existing architecture; production hardening/monitoring beyond this feature-parity request is described above. Original-backend behavior, physical camera/GPS/microphone and real SMS cannot be certified from automated browser tests.
 
 ## Merge and deployment
 
-`.github/workflows/deploy.yml` validates pull requests with lint, backend tests, isolated security-rule emulators, desktop/phone browser tests and a production build. A push to `main` deploys Hosting, Functions, Firestore rules/indexes and Storage rules to `pawlytics-84071` using GitHub OIDC Workload Identity Federation. No service-account private key or Gemini key is stored in GitHub. Public browser configuration and the deployment provider/service-account identifiers are repository variables; Gemini remains in Google Secret Manager.
+`.github/workflows/deploy.yml` validates pull requests with lint, backend tests, isolated security-rule and callable integration emulators, desktop/phone browser tests and a production build. A push to `main` deploys Hosting, Functions, Firestore rules/indexes and Storage rules to `pawlytics-84071` using GitHub OIDC Workload Identity Federation. No service-account private key or Gemini key is stored in GitHub. Public browser configuration and the deployment provider/service-account identifiers are repository variables; Gemini remains in Google Secret Manager.

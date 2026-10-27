@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "test": "npm run lint && npm run test:functions && npm run test:rules && npm run test:e2e",
+    "test": "npm run lint && npm run test:functions && npm run test:rules && npm run test:integration && npm run test:e2e",
     "test:e2e": "playwright test",
     "test:e2e:live": "node scripts/test-live-browser.mjs",
     "test:functions": "npm --prefix functions test",
@@ -19,12 +19,15 @@
     "backfill:timezones": "node scripts/backfill-sighting-timezones.mjs",
     "preview": "vite preview",
     "emulators": "firebase emulators:start",
-    "deploy:functions": "firebase deploy --only functions"
+    "deploy:functions": "firebase deploy --only functions",
+    "typecheck": "tsc -b",
+    "test:integration": "npm run build --prefix functions && node scripts/test-rules.mjs --integration"
   },
   "dependencies": {
     "@googlemaps/js-api-loader": "^1.16.10",
     "exifr": "^7.1.3",
     "firebase": "^11.8.1",
+    "jspdf": "^4.2.1",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",

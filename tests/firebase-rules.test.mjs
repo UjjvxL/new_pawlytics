@@ -202,3 +202,17 @@ test("rules remain deterministic under repeated unauthorized access", async () =
     50,
   );
 });
+
+test('authority operation ledgers stay private and cannot be forged directly by clients', async () => {
+  const path='organizations/org-a/operations/operation-one';
+  await environment.withSecurityRulesDisabled(async context => {
+    await setDoc(doc(context.firestore(),path),{kind:'arv',quantity:12});
+    await setDoc(doc(context.firestore(),'organizations/org-b/operations/operation-two'),{kind:'abc'});
+  });
+  const authorized=environment.authenticatedContext('reviewer',{firebase:{sign_in_second_factor:'phone'}}).firestore();
+  await assertSucceeds(getDoc(doc(authorized,path)));
+  await assertFails(getDoc(doc(authorized,'organizations/org-b/operations/operation-two')));
+  await assertFails(getDoc(doc(environment.unauthenticatedContext().firestore(),path)));
+  await assertFails(getDoc(doc(environment.authenticatedContext('reviewer').firestore(),path)));
+  await assertFails(setDoc(doc(authorized,path),{kind:'arv',quantity:999}));
+});

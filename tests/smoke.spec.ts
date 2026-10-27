@@ -231,7 +231,7 @@ test("NCR judge route demonstrably avoids the seeded danger corridor", async ({
   await expect(page.locator(".map .gm-style")).toBeVisible({ timeout: 20_000 });
   await page.getByRole("button", { name: "Where to?" }).click();
   await page.getByRole("button", { name: "Pari Chowk" }).click();
-  await expect(page.getByText(/Shield avoided \d+ danger-risk points/)).toBeVisible({
+  await expect(page.getByText(/Shield avoided \d+(?:\.\d+)? danger-risk points/)).toBeVisible({
     timeout: 30_000,
   });
   await expect(
@@ -319,7 +319,7 @@ test("Google map tiles and destination suggestions are operational", async ({
 test("authority URL renders its own authentication surface", async ({
   page,
 }) => {
-  await page.goto("/authority");
+  await page.goto("/authority/live");
 
   await expect(
     page.getByRole("heading", { name: "Pawlytics Authority" }),
@@ -348,8 +348,8 @@ test("NCR authority demo connects command, district, incident, ABC and care oper
   await expect(page.getByText("Unified incident register")).toBeVisible();
   await page.getByRole("button", { name: /INC-2841/ }).click();
   await expect(page.getByText("AI evidence fusion · 96%")).toBeVisible();
-  await page.getByRole("button", { name: "Dispatch nearest team" }).click();
-  await expect(page.getByText(/Nearest response team dispatched/)).toBeVisible();
+  await page.getByRole("button", { name: "Simulate dispatch" }).click();
+  await expect(page.getByText(/No team was contacted/)).toBeVisible();
 
   await page.getByRole("button", { name: "ABC & rabies" }).click();
   await expect(page.getByText("ABC traceability pipeline")).toBeVisible();

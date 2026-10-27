@@ -3,7 +3,7 @@ name: Validate and deploy Pawlytics
 on:
   pull_request:
   push:
-    branches: [main, codex/feature-parity-and-deployment]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -43,7 +43,19 @@ jobs:
           java-version: 21
       - run: npm ci --no-audit --no-fund
       - run: npm ci --prefix functions --no-audit --no-fund
-      - run: npx playwright install --with-deps chrome
+      - name: Use the hosted runner's Chrome without reinstalling it
+        run: |
+          if [ -x /opt/google/chrome/chrome ]; then
+            /opt/google/chrome/chrome --version
+          else
+            npx playwright install --with-deps chrome
+          fi
+      - name: Keep isolated emulator tests independent of production secrets
+        run: |
+          node --input-type=module <<'JS'
+          import { writeFileSync } from 'node:fs';
+          writeFileSync('functions/.secret.local', 'GEMINI_API_KEY=emulator-only-unavailable\n', { mode: 0o600 });
+          JS
       - run: npm test
       - run: npm run build
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -55,7 +67,7 @@ jobs:
 
   deploy:
     needs: checks
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/feature-parity-and-deployment')
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

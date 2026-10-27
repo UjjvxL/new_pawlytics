@@ -19,6 +19,7 @@ if (!email.includes("@") || !allowedRoles.has(role)) {
 
 const require = createRequire(import.meta.url);
 const auth = require("firebase-tools/lib/auth.js");
+const { configstore } = require("firebase-tools/lib/configstore.js");
 const account = auth.getGlobalDefaultAccount();
 if (!account?.tokens?.refresh_token) {
   throw new Error("Sign in with the Firebase CLI before granting access.");
@@ -26,7 +27,7 @@ if (!account?.tokens?.refresh_token) {
 const token =
   account.tokens.access_token && account.tokens.expires_at > Date.now() + 60_000
     ? account.tokens.access_token
-    : (await auth.getAccessToken(account.tokens.refresh_token)).access_token;
+    : (await auth.getAccessToken(account.tokens.refresh_token, configstore.get("loginScopes") || [])).access_token;
 const base = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`;
 const request = async (url, init = {}) => {
   const response = await fetch(url, {

@@ -87,7 +87,7 @@ test("AI-only publishes calm evidence but escalates danger and production GPS mi
   );
   assert.equal(
     triageReport(calm, "mismatch", "recent", true).status,
-    "provisional",
+    "review_required",
   );
   assert.equal(
     triageReport({ ...calm, containsDog: false }, "verified", "recent").status,
@@ -100,7 +100,7 @@ test("AI-only publishes calm evidence but escalates danger and production GPS mi
       "stale",
       true,
     ).status,
-    "provisional",
+    "rejected",
   );
 });
 
@@ -149,4 +149,11 @@ test("stress: policy always returns a terminal valid decision", () => {
 test("test accounts receive an isolated higher limit", () => {
   assert.deepEqual(reportRateLimits(false), { tenMinutes: 8, day: 30 });
   assert.deepEqual(reportRateLimits(true), { tenMinutes: 60, day: 300 });
+});
+
+test("reported danger still requires human review when the photo appears calm", () => {
+  assert.equal(
+    triageReport(calm, "verified", "recent", false, true).status,
+    "review_required",
+  );
 });

@@ -17,6 +17,11 @@ import sharp from "sharp";
 import tzLookup from "tz-lookup";
 import { hasAuthoritySecondFactor } from "./authority-policy";
 import {
+  validAbcTransition,
+  updateStock,
+  wardAnalytics,
+} from "./operations-policy";
+import {
   extractImageMetadata,
   optionalNumber,
   resolveImageMetadata,
@@ -157,6 +162,8 @@ function publicReport(
     locationEvidence: "privacy-protected",
     organizationId: data.organizationId || null,
     jurisdictionId: data.jurisdictionId || null,
+    wardId: data.wardId || null,
+    category: data.category || "sighting",
     testOnly: Boolean(data.testOnly),
     createdAt: data.createdAt || FieldValue.serverTimestamp(),
     expiresAt: Timestamp.fromMillis(Date.now() + hours * 3_600_000),
@@ -261,11 +268,19 @@ async function authority(
 ) {
   const auth = requireAuth(request);
   if (auth.token.platformAdmin === true) {
-    if (!hasAuthoritySecondFactor(auth.token)) throw new HttpsError("permission-denied", "Complete multi-factor sign-in for administrative access.");
+    if (!hasAuthoritySecondFactor(auth.token))
+      throw new HttpsError(
+        "permission-denied",
+        "Complete multi-factor sign-in for administrative access.",
+      );
     return { auth, member: { role: "platform_admin", jurisdictionIds: [] } };
   }
   const member = await membership(auth.uid, organizationId);
-  if (member.mfaRequired !== false && !hasAuthoritySecondFactor(auth.token)) throw new HttpsError("permission-denied", "Complete multi-factor sign-in for this authority account.");
+  if (member.mfaRequired !== false && !hasAuthoritySecondFactor(auth.token))
+    throw new HttpsError(
+      "permission-denied",
+      "Complete multi-factor sign-in for this authority account.",
+    );
   if (!roles.includes(member.role))
     throw new HttpsError(
       "permission-denied",
@@ -281,7 +296,9 @@ export const bootstrapUser = onCall(
       ref = db.doc(`users/${a.uid}`),
       privateRef = db.doc(`userPrivate/${a.uid}`),
       settingsRef = db.doc(`userSettings/${a.uid}`),
-      email = String(a.token.email || "").trim().toLowerCase(),
+      email = String(a.token.email || "")
+        .trim()
+        .toLowerCase(),
       verifiedEmail = Boolean(a.token.email_verified) && email.includes("@"),
       grantRef = verifiedEmail
         ? db.doc(`authorityAccessGrants/${sha(email)}`)
@@ -462,6 +479,22 @@ export const createReportSession = onCall(
         request.data?.photoSource === "camera" ? "camera" : "library",
       sharePublicImage = request.data?.sharePublicImage === true,
       idempotencyKey = cleanText(request.data?.idempotencyKey, 80);
+    const category = cleanText(request.data?.category || "sighting", 30);
+    const observedAt = request.data?.observedAt
+      ? Date.parse(String(request.data.observedAt))
+      : Date.now();
+    if (
+      !["sighting", "aggression", "bite", "injured", "welfare"].includes(
+        category,
+      ) ||
+      !Number.isFinite(observedAt) ||
+      observedAt > Date.now() + 300_000 ||
+      observedAt < Date.now() - 7 * 86_400_000
+    )
+      throw new HttpsError(
+        "invalid-argument",
+        "Invalid category or observation time. Use a time within the last seven days.",
+      );
     const requestedTestMode = request.data?.testMode === true;
     if (requestedTestMode && a.token.platformAdmin !== true)
       throw new HttpsError(
@@ -525,6 +558,8 @@ export const createReportSession = onCall(
         sightingTimezone: timezoneAt(lat, lng),
         description,
         severity,
+        category,
+        observedAt: Timestamp.fromMillis(observedAt),
         photoSource,
         sharePublicImage,
         testOnly,
@@ -1026,10 +1061,14 @@ async function verifyReport(reportId: string) {
       const modelName = modelNames[attempt - 1],
         model = gemini.getGenerativeModel(
           {
-            model: vertexExpress ? `publishers/google/models/${modelName}` : modelName,
+            model: vertexExpress
+              ? `publishers/google/models/${modelName}`
+              : modelName,
             generationConfig,
           },
-          vertexExpress ? { baseUrl: "https://aiplatform.googleapis.com", apiVersion: "v1" } : undefined,
+          vertexExpress
+            ? { baseUrl: "https://aiplatform.googleapis.com", apiVersion: "v1" }
+            : undefined,
         );
       try {
         await ref.update({ aiAttempt: attempt, aiModelAttempted: modelName });
@@ -1087,44 +1126,24 @@ async function verifyReport(reportId: string) {
     };
   } catch (error) {
     logger.error("gemini-failed", { reportId, error: String(error) });
-    if (data.testOnly) {
-      selectedModel = "admin-test-fallback";
-      verdict = {
-        containsDog: false,
-        plausible: false,
-        manipulationLikely: false,
-        privacySafeForPublic: true,
-        confidence: 0,
-        dogCount: 0,
-        observedSeverity: "low",
-        observedBehavior: "unknown",
-        sceneSummary:
-          "Admin test completed while every configured AI model was temporarily unavailable.",
-        reason:
-          "AI provider quota or availability prevented visual analysis; this result is isolated to test mode.",
-      };
-      await ref.update({
-        aiFallback: true,
-        aiFailure: cleanText(String(error), 300),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-    } else {
-      await ref.update({
-        verificationStatus: "review_required",
-        processingStatus: "ai_failed",
-        aiReason:
-          "Automated verification unavailable; queued for human review.",
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-      await createReviewCase(reportId, data, ["ai_service_failure"]);
-      return;
-    }
+    await ref.update({
+      verificationStatus: "review_required",
+      processingStatus: "ai_failed",
+      aiReason: "Automated verification unavailable; queued for human review.",
+      decisionSource: "human_required",
+      aiFallback: false,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    await createReviewCase(reportId, data, ["ai_service_failure"]);
+    return;
   }
   const decision = triageReport(
       verdict,
       locationEvidence,
       timeEvidence,
       Boolean(data.testOnly),
+      data.severity === "high" ||
+        ["bite", "aggression", "injured"].includes(data.category),
     ),
     { autoPublish, status, evidenceQuality } = decision,
     reason =
@@ -1141,9 +1160,7 @@ async function verifyReport(reportId: string) {
       processingStatus: "complete",
       decisionSource: autoPublish
         ? data.testOnly
-          ? selectedModel === "admin-test-fallback"
-            ? "admin_test_fallback"
-            : "admin_test_ai"
+          ? "admin_test_ai"
           : "ai_only"
         : status === "rejected"
           ? "ai_rejection"
@@ -1203,6 +1220,8 @@ async function createReviewCase(
       reporterId: data.reporterId,
       organizationId: data.organizationId || null,
       jurisdictionId: data.jurisdictionId || null,
+      wardId: data.wardId || null,
+      category: data.category || "sighting",
       priority:
         data.observedSeverity === "high" || data.severity === "high"
           ? "high"
@@ -1449,7 +1468,8 @@ export const reviewReport = onCall(
       reportId = cleanText(request.data?.reportId, 80),
       decision = request.data?.decision as ReviewDecision,
       reason = cleanText(request.data?.reason, 300),
-      publishImage = request.data?.publishImage === true;
+      publishImage = request.data?.publishImage === true,
+      wardId = cleanText(request.data?.wardId, 80);
     if (
       !reportId ||
       !["confirmed", "rejected", "duplicate"].includes(decision) ||
@@ -1469,7 +1489,8 @@ export const reviewReport = onCall(
     if (
       !snap.exists ||
       !data ||
-      (data.organizationId && data.organizationId !== organizationId)
+      (auth.token.platformAdmin !== true &&
+        data.organizationId !== organizationId)
     )
       throw new HttpsError(
         "not-found",
@@ -1478,6 +1499,7 @@ export const reviewReport = onCall(
     await ref.update({
       verificationStatus: decision,
       moderatorReason: reason,
+      ...(wardId ? { wardId } : {}),
       reviewerId: auth.uid,
       reviewedAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
@@ -1490,7 +1512,12 @@ export const reviewReport = onCall(
       await db
         .doc(`publicSightings/${reportId}`)
         .set(
-          publicReport(reportId, { ...data, ...publicImage }, "confirmed", 24),
+          publicReport(
+            reportId,
+            { ...data, ...publicImage, ...(wardId ? { wardId } : {}) },
+            "confirmed",
+            24,
+          ),
         );
       await awardConfirmedReport(reportId, data);
     } else {
@@ -1781,7 +1808,9 @@ export const getAuthorityContext = onCall(
         .get();
     return {
       platformAdmin: a.token.platformAdmin === true,
-      mfaEnrolled: Boolean((await getAuth().getUser(a.uid)).multiFactor?.enrolledFactors.length),
+      mfaEnrolled: Boolean(
+        (await getAuth().getUser(a.uid)).multiFactor?.enrolledFactors.length,
+      ),
       mfaSatisfied: hasAuthoritySecondFactor(a.token),
       memberships: members.docs.map((d) => ({
         organizationId: d.ref.parent.parent!.id,
@@ -1799,7 +1828,11 @@ export const createOrganization = onCall(
         "permission-denied",
         "Platform administrator required.",
       );
-    if (!hasAuthoritySecondFactor(a.token)) throw new HttpsError("permission-denied", "Complete multi-factor sign-in for administrative access.");
+    if (!hasAuthoritySecondFactor(a.token))
+      throw new HttpsError(
+        "permission-denied",
+        "Complete multi-factor sign-in for administrative access.",
+      );
     const name = cleanText(request.data?.name, 120),
       city = cleanText(request.data?.city, 80);
     if (name.length < 3 || city.length < 2)
@@ -2101,5 +2134,170 @@ export const verifySighting = onCall(
       "failed-precondition",
       "Update Pawlytics and resubmit through the secure report flow.",
     );
+  },
+);
+
+export const getAuthorityOperations = onCall(
+  { region: REGION, enforceAppCheck: false },
+  async (request) => {
+    const organizationId = cleanText(request.data?.organizationId, 80);
+    if (!/^[a-zA-Z0-9_-]{1,80}$/.test(organizationId))
+      throw new HttpsError("invalid-argument", "Select a valid organization.");
+    await authority(request, organizationId, [
+      "org_admin",
+      "moderator",
+      "dispatcher",
+      "field_officer",
+      "analyst",
+    ]);
+    const [reports, animals, stock, events] = await Promise.all([
+      db
+        .collection("publicSightings")
+        .where("organizationId", "==", organizationId)
+        .limit(1000)
+        .get(),
+      db
+        .collection(`organizations/${organizationId}/abcAnimals`)
+        .limit(300)
+        .get(),
+      db
+        .collection(`organizations/${organizationId}/arvStock`)
+        .limit(300)
+        .get(),
+      db
+        .collection(`organizations/${organizationId}/operations`)
+        .orderBy("createdAt", "desc")
+        .limit(50)
+        .get(),
+    ]);
+    return {
+      wards: wardAnalytics(
+        reports.docs.map((doc) => {
+          const d = doc.data();
+          return {
+            ...d,
+            createdAtMillis: d.createdAt?.toMillis?.(),
+            expiresAtMillis: d.expiresAt?.toMillis?.(),
+          };
+        }),
+      ),
+      animals: animals.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
+      stock: stock.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
+      events: events.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
+      reportLimitReached: reports.size === 1000,
+      generatedAt: new Date().toISOString(),
+    };
+  },
+);
+
+export const recordAuthorityOperation = onCall(
+  { region: REGION, enforceAppCheck: false },
+  async (request) => {
+    const organizationId = cleanText(request.data?.organizationId, 80);
+    if (!/^[a-zA-Z0-9_-]{1,80}$/.test(organizationId))
+      throw new HttpsError("invalid-argument", "Select a valid organization.");
+    const { auth } = await authority(request, organizationId, [
+      "org_admin",
+      "dispatcher",
+      "field_officer",
+    ]);
+    const kind = cleanText(request.data?.kind, 10),
+      subject = cleanText(request.data?.subject, 100),
+      wardId = cleanText(request.data?.wardId, 80),
+      stage = cleanText(request.data?.stage, 40),
+      note = cleanText(request.data?.note, 300),
+      idempotencyKey = cleanText(request.data?.idempotencyKey, 80);
+    if (
+      !["abc", "arv"].includes(kind) ||
+      subject.length < 2 ||
+      !wardId ||
+      !idempotencyKey
+    )
+      throw new HttpsError(
+        "invalid-argument",
+        "Kind, animal tag/facility, ward and request ID are required.",
+      );
+    const quantity = Number(request.data?.quantity),
+      payloadHash = sha(
+        JSON.stringify({
+          kind,
+          subject,
+          wardId,
+          stage,
+          note,
+          quantity: kind === "arv" ? quantity : null,
+        }),
+      ),
+      eventRef = db.doc(
+        `organizations/${organizationId}/operations/${sha(auth.uid + ":" + idempotencyKey)}`,
+      ),
+      recordRef = db.doc(
+        `organizations/${organizationId}/${kind === "abc" ? "abcAnimals" : "arvStock"}/${sha((kind === "arv" ? wardId + ":" : "") + subject.toLowerCase()).slice(0, 32)}`,
+      );
+    await db.runTransaction(async (tx) => {
+      const [event, current] = await Promise.all([
+        tx.get(eventRef),
+        tx.get(recordRef),
+      ]);
+      if (event.exists) {
+        if (event.data()?.payloadHash !== payloadHash)
+          throw new HttpsError(
+            "already-exists",
+            "This request ID was already used for different operation details.",
+          );
+        return;
+      }
+      const previous = current.data();
+      let balance: number | undefined;
+      if (kind === "abc") {
+        if (!validAbcTransition(previous?.stage, stage))
+          throw new HttpsError(
+            "failed-precondition",
+            "Record ABC stages in order, from capture through recovery to release.",
+          );
+      } else {
+        try {
+          balance = updateStock(
+            Number(previous?.balance || 0),
+            stage,
+            quantity,
+          );
+        } catch (error) {
+          throw new HttpsError(
+            "failed-precondition",
+            String((error as Error).message),
+          );
+        }
+      }
+      const common = {
+        subject,
+        wardId,
+        updatedBy: auth.uid,
+        updatedAt: FieldValue.serverTimestamp(),
+      };
+      tx.set(
+        recordRef,
+        { ...common, ...(kind === "abc" ? { stage } : { balance }) },
+        { merge: true },
+      );
+      tx.create(eventRef, {
+        ...common,
+        kind,
+        stage,
+        note,
+        payloadHash,
+        ...(kind === "arv" ? { quantity, balance } : {}),
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      tx.create(db.collection("auditLogs").doc(), {
+        actorId: auth.uid,
+        organizationId,
+        action: "record_" + kind,
+        targetId: recordRef.id,
+        targetType: "authorityOperation",
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    });
+    return { ok: true, eventId: eventRef.id };
   },
 );
