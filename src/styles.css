@@ -3181,3 +3181,7 @@ textarea {
 .mfa-card button:disabled { opacity: .5; cursor: wait; }
 .care-filters :is(button,a) { min-height: 36px; height: 36px; font-size: 11px; white-space: nowrap; }
 .care-filters :is(button,a):focus-visible { outline: 3px solid #16826e; outline-offset: -3px; }
+/* Keep fallback controls inside the map, above the citizen action dock. */
+.free-map-fallback .leaflet-control-container { position: static; }
+.free-map-fallback .leaflet-bottom.leaflet-left { bottom: 75px; }
+.free-map-fallback .leaflet-bottom.leaflet-right { bottom: 210px; right: 10px; }

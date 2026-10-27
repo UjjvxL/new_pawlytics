@@ -75,8 +75,6 @@ import WatchDemo from "./WatchDemo";
 import CctvDemo from "./CctvDemo";
 import AuthorityMfa, { MfaSignIn } from "./AuthorityMfa";
 import {
-  DEFAULT_DEMO_SIGHTINGS,
-  DEFAULT_DEMO_REVIEWS,
   demoAccountProfile,
   demoAccountReports,
   NCR_DEMO_DESTINATIONS,
@@ -524,7 +522,7 @@ export default function App() {
       return;
     }
     if (!isFirebaseConfigured) {
-      setSightings(DEFAULT_DEMO_SIGHTINGS);
+      setSightings([]);
       setSightingsReady(true);
       return;
     }
@@ -1523,7 +1521,7 @@ function AuthorityPortal({
   const [tab, setTab] = useState<
     "overview" | "reviews" | "actions" | "team" | "settings"
   >("overview");
-  const [reviews, setReviews] = useState<any[]>(DEFAULT_DEMO_REVIEWS),
+  const [reviews, setReviews] = useState<any[]>([]),
     [actions, setActions] = useState<any[]>([]),
     [members, setMembers] = useState<any[]>([]);
   const [selectedReport, setSelectedReport] = useState<Sighting | null>(null),
@@ -1579,11 +1577,7 @@ function AuthorityPortal({
           where("organizationId", "==", organizationId),
         ),
         (s) =>
-          setReviews(
-            s.docs.length > 0
-              ? s.docs.map((d) => ({ id: d.id, ...d.data() }))
-              : DEFAULT_DEMO_REVIEWS,
-          ),
+          setReviews(s.docs.map((d) => ({ id: d.id, ...d.data() }))),
       ),
       onSnapshot(
         query(
@@ -1609,12 +1603,7 @@ function AuthorityPortal({
     } catch {
       // ignore
     }
-    const match = DEFAULT_DEMO_SIGHTINGS.find((s) => s.id === reportId);
-    if (match) {
-      setSelectedReport(match);
-    } else {
-      setNotice("Report evidence could not be loaded.");
-    }
+    setNotice("Report evidence could not be loaded.");
   }
   if (!user)
     return (

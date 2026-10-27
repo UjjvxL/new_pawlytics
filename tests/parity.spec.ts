@@ -14,6 +14,11 @@ test("a blocked Google Maps script keeps the fallback map, care links, and walki
   await page.route(/maps\.googleapis\.com\/maps\/api\/js/, route => route.abort());
   await page.goto("/");
   await expect(page.getByRole("region", { name: "OpenStreetMap fallback" })).toBeVisible({ timeout: 25_000 });
+  const attribution = page.getByRole("link", { name: "OpenStreetMap", exact: true });
+  await expect(attribution).toBeVisible();
+  const attributionBounds = await attribution.boundingBox();
+  expect(attributionBounds?.y).toBeGreaterThanOrEqual(0);
+  expect((attributionBounds?.y || 0) + (attributionBounds?.height || 0)).toBeLessThanOrEqual(page.viewportSize()!.height);
   await expect(page.getByRole("link", { name: "Search Emergency vets in Google Maps" })).toHaveAttribute("href", /google\.com\/maps\/search/);
   await page.getByRole("button", { name: "Where to?", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Walking directions" })).toBeVisible();

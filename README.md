@@ -127,7 +127,7 @@ The reference is `https://pawlytics-506516.web.app/`; this repository deploys to
 | Impact points, trust tier, streaks, reward eligibility and incentive demo accounts | Present; demo rewards remain client-only and labelled |
 | Account export and delayed deletion/cancellation | Present |
 | Bite first aid, dog-approach guidance, rabies-care handoff and WHO reference | Present |
-| Authority invitations, organization/role access, review decisions and evidence | Present |
+| Authority invitations, organization/role access, review decisions and evidence | Present; empty live queues never substitute demo evidence |
 | Authority MFA enrollment and second-factor sign-in | Restored with Firebase SMS enrollment/challenge UI, server checks and Firestore enforcement |
 | Authority actions, team management and reviewed configuration changes | Present |
 | NCR demonstration: 480 dogs, 96 hotspots, route presets and density rendering | Present at `/demo` |

@@ -20,8 +20,9 @@ export default function FallbackMap({ sightings, location, onSelect, onMapTap }:
   tap.current = onMapTap;
   useEffect(() => {
     if (!node.current) return;
-    const instance = L.map(node.current, { zoomControl: false }).setView([20.5937, 78.9629], 5);
+    const instance = L.map(node.current, { zoomControl: false, attributionControl: false }).setView([20.5937, 78.9629], 5);
     L.control.zoom({ position: "bottomright" }).addTo(instance);
+    L.control.attribution({ position: "bottomleft" }).addTo(instance);
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
