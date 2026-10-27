@@ -2,6 +2,7 @@ node_modules
 dist
 .env
 .env.local
+.setup.local.mjs
 functions/.secret.local
 functions/.gemini-secret
 functions/lib
@@ -15,3 +16,5 @@ playwright-report
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts
+
+gha-creds-*.json

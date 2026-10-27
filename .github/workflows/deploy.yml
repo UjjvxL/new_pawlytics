@@ -1,0 +1,82 @@
+name: Validate and deploy Pawlytics
+
+on:
+  pull_request:
+  push:
+    branches: [main, codex/feature-parity-and-deployment]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pawlytics-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  VITE_GOOGLE_MAPS_API_KEY: ${{ vars.VITE_GOOGLE_MAPS_API_KEY }}
+  VITE_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}
+  VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
+  VITE_FIREBASE_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID }}
+  VITE_FIREBASE_STORAGE_BUCKET: ${{ vars.VITE_FIREBASE_STORAGE_BUCKET }}
+  VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+  VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
+  VITE_FIREBASE_FUNCTIONS_REGION: asia-south1
+  VITE_RECAPTCHA_ENTERPRISE_SITE_KEY: ${{ vars.VITE_RECAPTCHA_ENTERPRISE_SITE_KEY }}
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci --no-audit --no-fund
+      - run: npm ci --prefix functions --no-audit --no-fund
+      - run: npx playwright install --with-deps chrome
+      - run: npm test
+      - run: npm run build
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: failure()
+        with:
+          name: browser-test-failures
+          path: test-results/
+          retention-days: 7
+
+  deploy:
+    needs: checks
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/feature-parity-and-deployment')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm ci --prefix functions --no-audit --no-fund
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.PAWLYTICS_WIF_PROVIDER }}
+          service_account: ${{ vars.PAWLYTICS_DEPLOY_SERVICE_ACCOUNT }}
+      - run: npm run build
+      - run: npm run build --prefix functions
+      - name: Deploy rules, indexes, storage, functions, and website
+        run: npx firebase deploy --project pawlytics-84071 --only firestore:rules,firestore:indexes,storage,functions,hosting --non-interactive

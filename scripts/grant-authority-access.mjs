@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
+import { projectId } from "./project-config.mjs";
 
 const [emailInput, role = "moderator"] = process.argv.slice(2);
-const projectId = "pawlytics-506516";
 const allowedRoles = new Set([
   "moderator",
   "dispatcher",
