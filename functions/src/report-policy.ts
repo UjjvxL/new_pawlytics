@@ -59,9 +59,11 @@ export function triageReport(
   locationEvidence: string,
   timeEvidence: string,
   testOnly = false,
+  reportedDanger = false,
 ) {
   const confidence = Math.max(0, Math.min(1, Number(verdict.confidence) || 0));
   const dangerous =
+    reportedDanger ||
     verdict.observedSeverity === "high" ||
     ["aggressive", "chasing", "injured"].includes(verdict.observedBehavior);
   const visualConfidence =
@@ -70,14 +72,14 @@ export function triageReport(
     !verdict.manipulationLikely &&
     confidence >= 0.8;
   const locationMismatch = locationEvidence === "mismatch";
-  // A test report can only be created by a platform-admin claim and remains
-  // isolated from the production map and rewards. It still executes upload,
-  // metadata parsing, and Gemini before receiving a deterministic map result.
+  // Test mode changes isolation and quotas, never the evidence standard.
   const autoPublish =
-    testOnly || (visualConfidence && !dangerous && !locationMismatch);
-  const status = testOnly
-    ? "provisional"
-    : !verdict.containsDog && confidence >= 0.8
+    visualConfidence &&
+    !dangerous &&
+    !locationMismatch &&
+    timeEvidence !== "stale";
+  const status =
+    !verdict.containsDog && confidence >= 0.8
       ? "rejected"
       : autoPublish
         ? "provisional"

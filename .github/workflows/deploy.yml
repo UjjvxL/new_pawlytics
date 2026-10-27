@@ -3,7 +3,7 @@ name: Validate and deploy Pawlytics
 on:
   pull_request:
   push:
-    branches: [main, codex/feature-parity-and-deployment]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -55,7 +55,7 @@ jobs:
 
   deploy:
     needs: checks
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/feature-parity-and-deployment')
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

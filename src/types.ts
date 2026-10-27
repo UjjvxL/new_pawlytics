@@ -72,6 +72,9 @@ export interface Sighting {
   provisional?: boolean;
   organizationId?: string;
   jurisdictionId?: string;
+  wardId?: string;
+  category?: string;
+  observedAt?: { toDate: () => Date } | Date;
   rewardStatus?: "ineligible" | "pending" | "credited" | "reversed";
   pointsAwarded?: number;
 }

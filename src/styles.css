@@ -3185,3 +3185,16 @@ textarea {
 .free-map-fallback .leaflet-control-container { position: static; }
 .free-map-fallback .leaflet-bottom.leaflet-left { bottom: 75px; }
 .free-map-fallback .leaflet-bottom.leaflet-right { bottom: 210px; right: 10px; }
+.authority-operations { display: grid; gap: 18px; }
+.ops-scroll { overflow-x: auto; max-width: 100%; }
+.ops-scroll table { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; }
+.ops-scroll th,.ops-scroll td { padding: 12px 10px; border-bottom: 1px solid #e4ece6; white-space: nowrap; }
+.ops-form { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.ops-form label { display: grid; gap: 6px; font-size: 13px; font-weight: 700; color: #496157; }
+.ops-form input,.ops-form select { min-width: 0; width: 100%; min-height: 44px; padding: 10px; border: 1px solid #cfddd5; border-radius: 10px; font: inherit; background: white; }
+.ops-form button,.authority-operations .card-heading>button { min-height: 44px; padding: 10px 16px; color: white; background: #136f63; border: 0; border-radius: 10px; font-weight: 700; }
+.ops-error,.ops-notice { padding: 12px; border-radius: 10px; background: #fff1ed; color: #8c382b; }
+.ops-notice { background: #edf8f1; color: #246448; }
+@media(max-width:600px){.ops-form{grid-template-columns:1fr}.authority-operations .card-heading{flex-wrap:wrap;gap:10px}}
+.da-presentation-banner {display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;background:#eaf7f3;border:1px solid #b8e2d5;border-radius:12px;padding:12px 16px;margin-bottom:18px;color:#145c4d;font-size:13px;}
+.da-presentation-banner strong {font-size:14px}.da-presentation-banner a{font-weight:700;color:inherit}.da-primary{display:inline-flex;text-decoration:none;padding:10px 14px;border-radius:9px;background:#168c76;color:white;font-weight:600;font-size:12px;}.da-map-legend a,.da-network-list a{font-size:12px;color:#137c69;font-weight:600;text-decoration:none}.presentation-note{padding:12px;background:#eaf7f3;border-radius:10px;font-size:13px;line-height:1.5;color:#145c4d}.demo-sample-photo{border:1px solid #b8e2d5;background:#eaf7f3;border-radius:9px;padding:9px 12px;color:#145c4d}.report-sheet .field-label select,.report-sheet .field-label input{display:block;width:100%;max-width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;background:white;box-sizing:border-box;margin-top:5px}.da-main,.authority-operations{min-width:0}.da-main header h1{overflow-wrap:anywhere}.da-incident-table,.da-district-table,.da-network-list{overflow-x:auto}.da-network-list article{min-width:480px}@media(max-width:600px){.da-presentation-banner{gap:8px;padding:12px}.da-presentation-banner span{flex-basis:100%}.da-main>header{gap:12px;flex-wrap:wrap}.da-head-actions{flex-wrap:wrap}.da-head-actions select{max-width:160px}.da-incident-table>header,.da-incident-table>button{min-width:600px}.da-district-table>header,.da-district-table>article{min-width:650px}}

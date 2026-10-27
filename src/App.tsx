@@ -74,6 +74,7 @@ import DemoAuthorityPortal from "./DemoAuthorityPortal";
 import WatchDemo from "./WatchDemo";
 import CctvDemo from "./CctvDemo";
 import AuthorityMfa, { MfaSignIn } from "./AuthorityMfa";
+import AuthorityOperations from "./AuthorityOperations";
 import {
   demoAccountProfile,
   demoAccountReports,
@@ -235,13 +236,13 @@ function formatSightingTime(
   }
 }
 
-function isActiveSighting(sighting: Sighting) {
+function isActiveSighting(sighting: Sighting, now = Date.now()) {
   if (!sighting.expiresAt) return true;
   const expiresAt =
     "toDate" in sighting.expiresAt
       ? sighting.expiresAt.toDate()
       : sighting.expiresAt;
-  return expiresAt > new Date();
+  return expiresAt.getTime() > now;
 }
 
 function groupHotspots(reports: Sighting[]): Hotspot[] {
@@ -301,7 +302,7 @@ function distanceToSegment(
 
 function routeRisk(route: WalkingRoute, sightings: Sighting[]) {
   const path = route.overview_path.map((p) => p.toJSON());
-  return sightings.reduce((score, sighting) => {
+  const total = sightings.reduce((score, sighting) => {
     const point = { lat: sighting.lat, lng: sighting.lng };
     const radius = riskRadius[sighting.severity];
     if (
@@ -316,8 +317,11 @@ function routeRisk(route: WalkingRoute, sightings: Sighting[]) {
         (p, i) =>
           distanceToSegment(point, path[i], p) < radius,
       );
-    return score + (hit ? riskWeight[sighting.severity] : 0);
+    const ageHours = Math.max(0, Date.now() - sightingDate(sighting.createdAt).getTime()) / 3_600_000;
+    const dogs = Math.max(1, Math.min(30, sighting.dogCount || 1));
+    return score + (hit ? riskWeight[sighting.severity] * dogs * Math.pow(0.5, ageHours / 6) : 0);
   }, 0);
+  return Math.round(total * 10) / 10;
 }
 
 export default function App() {
@@ -343,7 +347,9 @@ export default function App() {
   const [initialMapReady, setInitialMapReady] = useState(false);
   const [sightings, setSightings] = useState<Sighting[]>([]);
   const [sightingsReady, setSightingsReady] = useState(false);
-  const [reportOpen, setReportOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(() => window.location.pathname === "/demo" && new URLSearchParams(window.location.search).has("report"));
+  const [riskClock, setRiskClock] = useState(Date.now());
+  useEffect(() => { const timer = window.setInterval(() => setRiskClock(Date.now()), 60_000); return () => window.clearInterval(timer); }, []);
   const [routeOpen, setRouteOpen] = useState(false);
   const [selected, setSelected] = useState<Hotspot | null>(null);
   const [location, setLocation] = useState<google.maps.LatLngLiteral | null>(
@@ -668,7 +674,7 @@ export default function App() {
     if (!mapsReady || !map.current || !sightingsReady) return;
     const visibleSightings = (
       testMode ? [...sightings, ...manualSightings] : sightings
-    ).filter((s) => (testMode || demoMode || !s.testOnly) && isActiveSighting(s));
+    ).filter((s) => (testMode || demoMode || !s.testOnly) && isActiveSighting(s, riskClock));
     const hotspots = groupHotspots(visibleSightings);
     const clearLayers = () => {
       markers.current.forEach((marker) => (marker.map = null));
@@ -766,7 +772,7 @@ export default function App() {
       idleListener.remove();
       clearLayers();
     };
-  }, [mapsReady, sightingsReady, sightings, testMode, demoMode, manualSightings]);
+  }, [mapsReady, sightingsReady, sightings, testMode, demoMode, manualSightings, riskClock]);
 
   useEffect(() => {
     if (!mapsReady || testMode) return;
@@ -1003,9 +1009,9 @@ export default function App() {
   const activeRisk = useMemo(
     () =>
       (testMode ? [...sightings, ...manualSightings] : sightings).filter(
-        (s) => (testMode || demoMode || !s.testOnly) && isActiveSighting(s),
+        (s) => (testMode || demoMode || !s.testOnly) && isActiveSighting(s, riskClock),
       ),
-    [sightings, testMode, demoMode, manualSightings],
+    [sightings, testMode, demoMode, manualSightings, riskClock],
   );
   const incentiveDemoProfile = useMemo(
     () => (demoMode && user ? demoAccountProfile(user.email, user.uid) : null),
@@ -1023,7 +1029,7 @@ export default function App() {
   if (mfaError) return <MfaSignIn error={mfaError} close={() => setMfaError(null)} />;
   if (window.location.pathname.startsWith("/demo/watch"))
     return <WatchDemo />;
-  if (window.location.pathname.startsWith("/demo/authority"))
+  if (window.location.pathname.startsWith("/demo/authority") || (window.location.pathname === "/authority" && !new URLSearchParams(window.location.search).has("invite")))
     return <DemoAuthorityPortal />;
   if (window.location.pathname.startsWith("/authority"))
     return <AuthorityPortal user={user} profile={profile} login={login} />;
@@ -1443,7 +1449,7 @@ export default function App() {
         </button>
         <button
           className="report-button"
-          onClick={() => (user ? setReportOpen(true) : login())}
+          onClick={() => (user || demoMode ? setReportOpen(true) : login())}
         >
           <Plus size={25} />
           <span>Report</span>
@@ -1472,8 +1478,9 @@ export default function App() {
           }}
         />
       )}
-      {reportOpen && user && (
+      {reportOpen && (user || demoMode) && (
         <ReportSheet
+          presentation={demoMode}
           testMode={testMode}
           initialLocation={location}
           locate={locate}
@@ -1519,7 +1526,7 @@ function AuthorityPortal({
   } | null>(null);
   const [organizationId, setOrganizationId] = useState("");
   const [tab, setTab] = useState<
-    "overview" | "reviews" | "actions" | "team" | "settings"
+    "overview" | "reviews" | "actions" | "team" | "settings" | "operations"
   >("overview");
   const [reviews, setReviews] = useState<any[]>([]),
     [actions, setActions] = useState<any[]>([]),
@@ -1613,7 +1620,7 @@ function AuthorityPortal({
             <PawLogo size={22} color="white" />
           </div>
           <h1>Pawlytics Authority</h1>
-          <p>Verified government and municipal staff only.</p>
+          <p>Invited Pawlytics authority and project staff only.</p>
           <button onClick={() => void login()}>
             Sign in with invited account
           </button>
@@ -1672,6 +1679,7 @@ function AuthorityPortal({
               ["overview", "Overview"],
               ["reviews", `Review queue (${openReviews})`],
               ["actions", "Field actions"],
+              ["operations", "Ward & ABC / ARV"],
               ["team", "People & access"],
               ["settings", "Policy settings"],
             ] as const
@@ -1710,7 +1718,7 @@ function AuthorityPortal({
                     ? "Field actions"
                     : tab === "team"
                       ? "People and access"
-                      : "Policy settings"}
+                      : tab === "operations" ? "Ward & ABC / ARV" : "Policy settings"}
             </h1>
             <p>Audited, jurisdiction-scoped safety operations</p>
           </div>
@@ -1734,6 +1742,7 @@ function AuthorityPortal({
             inline
           />
         )}
+        {tab === "operations" && <AuthorityOperations organizationId={organizationId} role={context.platformAdmin ? "platform_admin" : context.memberships.find(member => member.organizationId === organizationId)?.role || "analyst"} />}
         {tab === "overview" && (
           <div className="authority-overview">
             <div className="authority-kpis">
@@ -1850,6 +1859,7 @@ function ReviewPanel({
 }) {
   const [reason, setReason] = useState(""),
     [busy, setBusy] = useState(false);
+  const [wardId, setWardId] = useState(report.wardId || report.jurisdictionId || "");
   const [publishImage, setPublishImage] = useState(
     Boolean(report.sharePublicImage && report.privacySafeForPublic),
   );
@@ -1890,6 +1900,7 @@ function ReviewPanel({
         reportId: report.id,
         decision,
         reason,
+        wardId,
         publishImage: decision === "confirmed" && publishImage,
       });
       onStatus(`Report ${decision}.`);
@@ -2018,6 +2029,10 @@ function ReviewPanel({
           </dd>
         </div>
       </dl>
+      <label>
+        Ward / jurisdiction
+        <input value={wardId} maxLength={80} onChange={e => setWardId(e.target.value)} placeholder="Assign a ward for risk analytics" />
+      </label>
       <label>
         Mandatory decision reason
         <textarea
@@ -2714,7 +2729,7 @@ function AccountSheet({
             <Share2 />
             Share impact
           </button>
-          <a href="/authority">
+          <a href="/authority/live">
             <Settings />
             Authority portal
           </a>
@@ -2950,7 +2965,7 @@ function RouteSheet({
       await renderer?.show(chosen.result.routes[chosen.i]);
       const leg = chosen.result.routes[chosen.i].legs[0];
       const avoidedRisk = safeRouting
-        ? Math.max(0, baselineRisk - chosen.score)
+        ? Math.round(Math.max(0, baselineRisk - chosen.score) * 10) / 10
         : 0;
       const selectedPath = chosen.result.routes[chosen.i].overview_path;
       const waypoints = [1, 2, 3]
@@ -3195,12 +3210,14 @@ async function optimizePhoto(file: File): Promise<File> {
 }
 
 function ReportSheet({
+  presentation = false,
   testMode,
   initialLocation,
   locate,
   close,
   onStatus,
 }: {
+  presentation?: boolean;
   testMode: boolean;
   initialLocation: google.maps.LatLngLiteral | null;
   locate: () => Promise<google.maps.LatLngLiteral>;
@@ -3208,18 +3225,22 @@ function ReportSheet({
   onStatus: (v: string) => void;
 }) {
   const [description, setDescription] = useState("");
+  const [category, setCategory] = useState("sighting");
+  const [observedAt, setObservedAt] = useState(() => new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0,16));
+  const speech = useRef<{ stop: () => void } | null>(null);
+  useEffect(() => () => { speech.current?.stop(); }, []);
   const [severity, setSeverity] = useState<Severity>("medium");
   const [photo, setPhoto] = useState<File | null>(null);
   const [photoSource, setPhotoSource] = useState<"camera" | "library">(
     "library",
   );
-  const [sharePublicImage, setSharePublicImage] = useState(true);
+  const [sharePublicImage, setSharePublicImage] = useState(false);
   const [preview, setPreview] = useState("");
   const [listening, setListening] = useState(false);
   const [speechLanguage, setSpeechLanguage] = useState(
     navigator.language.startsWith("fr")
       ? "fr-CA"
-      : navigator.language.startsWith("hi")
+      : navigator.language.startsWith("mr") ? "mr-IN" : navigator.language.startsWith("hi")
         ? "hi-IN"
         : "en-CA",
   );
@@ -3251,7 +3272,10 @@ function ReportSheet({
         .webkitSpeechRecognition;
     if (!SpeechRecognition)
       return onStatus("Speech-to-text is not supported in this browser.");
+    if (listening) { speech.current?.stop(); return; }
     const recognition = new SpeechRecognition();
+    speech.current = recognition;
+    const prefix = description.trim();
     recognition.lang = speechLanguage;
     recognition.interimResults = true;
     recognition.onstart = () => setListening(true);
@@ -3264,9 +3288,7 @@ function ReportSheet({
     };
     recognition.onresult = (e: any) =>
       setDescription(
-        Array.from(e.results)
-          .map((r: any) => r[0].transcript)
-          .join(" "),
+        [prefix, Array.from(e.results).map((r: any) => r[0].transcript).join(" ")].filter(Boolean).join(" ").slice(0, 500),
       );
     recognition.start();
   }
@@ -3278,6 +3300,16 @@ function ReportSheet({
       );
     if (description.trim().length < 10)
       return onStatus("Please describe what you saw in a little more detail.");
+    const observationTime = new Date(observedAt).getTime();
+    if (!Number.isFinite(observationTime) || observationTime > Date.now() + 5 * 60_000 || observationTime < Date.now() - 7 * 86_400_000)
+      return onStatus("Choose an observation time within the last seven days.");
+    if (presentation) {
+      try {
+        sessionStorage.setItem("pawlytics:presentation-report", JSON.stringify({description: description.trim(),category,severity,observedAt:new Date(observationTime).toISOString(),lat:28.4589,lng:77.4947,photoName:photo.name,mode:"presentation-only"}));
+        close(); onStatus("Demo draft saved in this tab only. No photo was uploaded, report submitted or AI verification performed.");
+      } catch { onStatus("Browser storage is unavailable. The demo draft could not be saved."); }
+      return;
+    }
     setSaving(true);
     let currentStage = "Getting precise location…";
     try {
@@ -3293,6 +3325,8 @@ function ReportSheet({
         ...position,
         description: description.trim(),
         severity,
+        category,
+        observedAt: new Date(observationTime).toISOString(),
         photoSource,
         sharePublicImage,
         testMode,
@@ -3375,10 +3409,13 @@ function ReportSheet({
           </button>
           <div>
             <h2>Report a dog sighting</h2>
-            <p>Your report will be checked by AI</p>
+            <p>{presentation ? "Presentation draft · no server submission" : "Your report will be checked by AI"}</p>
           </div>
         </div>
         <form onSubmit={submit}>
+          {presentation && <div className="presentation-note">Sample NCR location and local draft only. Your photo stays in this browser and is not uploaded.</div>}
+          <label className="field-label">Category<select aria-label="Report category" value={category} onChange={e => setCategory(e.target.value)}><option value="sighting">Dog sighting</option><option value="aggression">Chasing / aggression</option><option value="bite">Bite incident</option><option value="injured">Injured animal</option><option value="welfare">Animal welfare</option></select></label>
+          <label className="field-label">Observed at<input aria-label="Observation time" type="datetime-local" required value={observedAt} onChange={e => setObservedAt(e.target.value)} /></label>
           {saving && (
             <div className="report-progress" role="status" aria-live="polite">
               <div className="verification-orbit">
@@ -3410,7 +3447,7 @@ function ReportSheet({
             <label className="field-label">What is happening?</label>
             <select
               value={speechLanguage}
-              onChange={(e) => setSpeechLanguage(e.target.value)}
+              onChange={(e) => { speech.current?.stop(); setSpeechLanguage(e.target.value); }}
               aria-label="Voice language"
             >
               <option value="en-CA">English (Canada)</option>
@@ -3495,6 +3532,11 @@ function ReportSheet({
               />
             </label>
           </div>
+          {presentation && <button type="button" className="demo-sample-photo" onClick={() => {
+            void fetch("/demo/dogs/street-dog-1.webp").then(response => { if (!response.ok) throw new Error(); return response.blob(); }).then(blob => {
+              const sample = new File([blob], "presentation-sample.webp", {type: "image/webp"}); setPhoto(sample); setPreview(URL.createObjectURL(sample));
+            }).catch(() => onStatus("Sample photo is unavailable. Choose a local photo."));
+          }}>Use sample photo</button>}
           {photo && (
             <p className="photo-evidence">
               {photoSource === "camera"
@@ -3520,12 +3562,12 @@ function ReportSheet({
           <div className="location-confirm">
             <MapPin />
             <div>
-              <strong>Current location attached</strong>
+              <strong>{presentation ? "Sample NCR location" : initialLocation ? "Current location ready" : "Location permission requested on submit"}</strong>
               <span>Location and time help prevent false reports</span>
             </div>
           </div>
           <button className="submit-report" disabled={saving}>
-            {saving ? stage : "Submit for verification"}
+            {saving ? stage : presentation ? "Save demo draft" : "Submit for verification"}
           </button>
         </form>
       </section>
@@ -3644,7 +3686,7 @@ function HotspotCard({
               : hotspot.reports.length === 2
                 ? "moderate"
                 : "limited"}
-            .
+            . Route scores use severity, dog count and age (six-hour half-life); expired reports are excluded. Reports cannot guarantee a safe route.
           </span>
         </div>
       </header>

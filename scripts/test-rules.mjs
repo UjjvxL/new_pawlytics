@@ -14,10 +14,11 @@ if (currentJava.status !== 0) {
   if (!javaBin) throw new Error("Firebase rule tests require Java 21 or newer on PATH or in JAVA_HOME.");
   env.PATH = javaBin + delimiter + (env.PATH || "");
 }
+const integration = process.argv.includes("--integration");
 const result = spawnSync(process.execPath, [
   "node_modules/firebase-tools/lib/bin/firebase.js",
-  "emulators:exec", "--only", "firestore,storage", "--project", "demo-pawlytics",
-  "node --test tests/firebase-rules.test.mjs",
+  "emulators:exec", "--only", integration ? "auth,functions,firestore,storage" : "firestore,storage", "--project", "demo-pawlytics",
+  integration ? "node --test tests/backend-integration.test.mjs" : "node --test tests/firebase-rules.test.mjs",
 ], { env, stdio: "inherit" });
 if (result.error) throw result.error;
 process.exitCode = result.status ?? 1;
