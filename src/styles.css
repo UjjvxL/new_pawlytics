@@ -3124,3 +3124,60 @@ textarea {
 .verification-timeline li:has(i.active) small {
   color: #176a5c;
 }
+
+/* Care filters are available on live, demo, and fallback maps. */
+.care-filters a { min-height: 36px; flex: 0 0 auto; display: flex; align-items: center; gap: 6px; padding: 8px 11px; border: 1px solid #dce7e1; border-radius: 18px; color: #36594d; background: #fffffff5; text-decoration: none; font-size: 11px; font-weight: 700; box-shadow: 0 2px 8px #183b2c0b; }
+.care-filters a b { font-size: 10px; color: #668076; }
+
+/* The companion uses the same teal actions and readable touch targets as the map. */
+.watch-companion .watch-case { width: 300px; height: 390px; border-radius: 48px; }
+.watch-companion .watch-status { top: 12px; left: 22px; right: 22px; height: 20px; font-size: 12px; }
+.watch-companion .watch-status small { font-size: 10px; }
+.watch-companion .watch-scroll { inset: 36px 0 0; padding: 8px 18px 24px; }
+.watch-companion .watch-brand strong { font-size: 17px; }
+.watch-companion .watch-brand small { font-size: 9px; }
+.watch-companion .watch-risk>strong { font-size: 20px; }
+.watch-companion .watch-risk p { font-size: 12px; }
+.watch-companion .watch-risk>small { font-size: 10px; }
+.watch-companion .watch-primary { min-height: 52px; }
+.watch-companion .watch-primary strong { font-size: 14px; }
+.watch-companion .watch-primary small { font-size: 11px; }
+.watch-companion .watch-grid button { min-height: 62px; }
+.watch-companion .watch-grid strong { font-size: 12px; }
+.watch-companion .watch-sos-link { min-height: 42px; font-size: 12px; }
+.watch-companion .watch-scroll footer { font-size: 9px; }
+.watch-companion .watch-page h1 { font-size: 22px; }
+.watch-companion .watch-page>p { font-size: 12px; }
+.watch-companion .watch-destination { min-height: 48px; }
+.watch-companion .watch-destination strong { font-size: 13px; }
+.watch-companion .watch-destination small { font-size: 11px; }
+.watch-companion .watch-go,.watch-companion .watch-report,.watch-companion .watch-emergency,.watch-companion .watch-nearby { min-height: 44px; font-size: 12px; }
+.watch-companion .watch-note,.watch-companion .watch-location small { font-size: 10px; }
+.watch-companion .watch-location strong { font-size: 12px; }
+.watch-companion .watch-sos-steps span { font-size: 12px; line-height: 1.4; }
+.watch-companion .watch-close { top: 38px; width: 32px; height: 32px; }
+.watch-companion .watch-success strong { font-size: 15px; }
+.watch-companion .watch-success span { font-size: 11px; }
+.watch-feedback { color: #80dfbc; font-size: 12px; text-align: center; overflow-wrap: anywhere; }
+.watch-map-home { position: fixed; z-index: 20; bottom: 12px; left: 50%; transform: translateX(-50%); color: white; background: #136f63; border-radius: 20px; padding: 9px 14px; font-size: 12px; text-decoration: none; }
+@media(max-width:260px),(max-height:360px) {
+ .watch-companion .watch-case { width: 100vw; height: 100dvh; border: 0; border-radius: 0; }
+ .watch-companion .watch-scroll { padding: 5px 11px 18px; }
+ .watch-companion .watch-brand strong { font-size: 14px; }
+ .watch-companion .watch-risk>strong { font-size: 16px; }
+ .watch-companion .watch-primary strong,.watch-companion .watch-destination strong { font-size: 12px; }
+ .watch-map-home { left: 7px; top: 48px; bottom: auto; transform: none; font-size: 8px; padding: 5px 7px; }
+}
+@media(prefers-reduced-motion:reduce) { .watch-radar:after { animation: none; } }
+.free-map-fallback { position: absolute; inset: 0; z-index: 0; background: #eaf0e9; }
+.free-map-fallback .leaflet-control-container { position: relative; z-index: 2; }
+.free-map-fallback .leaflet-bottom { bottom: 110px; }
+.free-map-fallback .leaflet-control-attribution { max-width: 75vw; font-size: 10px; }
+.free-map-fallback .leaflet-top { top: 90px; }
+.mfa-card { width: min(440px,calc(100vw - 32px)); }
+.mfa-card label { display: grid; gap: 7px; text-align: left; color: #435e53; font-size: 13px; font-weight: 700; }
+.mfa-card input,.mfa-card select { width: 100%; min-height: 46px; padding: 10px 12px; border: 1px solid #cfded5; border-radius: 12px; font: inherit; background: white; }
+.mfa-card [role=status] { padding: 10px; border-radius: 10px; background: #eff5f1; color: #32594a; font-size: 13px; }
+.mfa-card button:disabled { opacity: .5; cursor: wait; }
+.care-filters :is(button,a) { min-height: 36px; height: 36px; font-size: 11px; white-space: nowrap; }
+.care-filters :is(button,a):focus-visible { outline: 3px solid #16826e; outline-offset: -3px; }

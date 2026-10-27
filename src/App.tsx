@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Loader } from "@googlemaps/js-api-loader";
 import { computeWalkingRoutes, WalkingRouteRenderer, type WalkingRoute, type WalkingRoutesResult } from "./routes";
 import {
@@ -21,6 +21,7 @@ import {
   signInWithRedirect,
   signOut,
   type User,
+  type MultiFactorError,
 } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
 import {
@@ -72,6 +73,7 @@ import PawLogo from "./PawLogo";
 import DemoAuthorityPortal from "./DemoAuthorityPortal";
 import WatchDemo from "./WatchDemo";
 import CctvDemo from "./CctvDemo";
+import AuthorityMfa, { MfaSignIn } from "./AuthorityMfa";
 import {
   DEFAULT_DEMO_SIGHTINGS,
   DEFAULT_DEMO_REVIEWS,
@@ -83,6 +85,8 @@ import {
 } from "./demoData";
 
 const INDIA = { lat: 20.5937, lng: 78.9629 };
+const FallbackMap = lazy(() => import("./FallbackMap"));
+const FallbackRouteSheet = lazy(() => import("./FallbackMap").then(module => ({ default: module.FallbackRouteSheet })));
 const riskRadius: Record<Severity, number> = {
   low: 250,
   medium: 250,
@@ -333,6 +337,7 @@ export default function App() {
   const followingRef = useRef(true);
   const reroute = useRef<(risks: Sighting[]) => Promise<void>>();
   const [user, setUser] = useState<User | null>(null);
+  const [mfaError, setMfaError] = useState<MultiFactorError | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
   const [mapsReady, setMapsReady] = useState(false);
@@ -439,6 +444,7 @@ export default function App() {
       } catch (error) {
         if (!cancelled) {
           console.error("redirect-sign-in", error);
+          if ((error as { code?: string }).code === "auth/multi-factor-auth-required") setMfaError(error as MultiFactorError);
           setNotice(
             "Google sign-in could not be completed. Check that this domain is authorized and retry.",
           );
@@ -542,6 +548,20 @@ export default function App() {
   useEffect(() => {
     const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
     if (!key || !mapNode.current) return;
+    let active = true;
+    const fail = () => {
+      if (!active) return;
+      setMapsFailed(true);
+      setNotice("Google Maps is unavailable. OpenStreetMap is ready; you can still view sightings and find care.");
+    };
+    const timer = window.setTimeout(fail, 20_000);
+    const observer = new MutationObserver(() => {
+      if (mapNode.current?.querySelector(".gm-err-container,.gm-err-message")) fail();
+    });
+    observer.observe(mapNode.current, { childList: true, subtree: true });
+    const browserWindow = window as Window & { gm_authFailure?: () => void };
+    const previousAuthFailure = browserWindow.gm_authFailure;
+    browserWindow.gm_authFailure = fail;
     new Loader({
       apiKey: key,
       version: "weekly",
@@ -549,6 +569,7 @@ export default function App() {
     })
       .load()
       .then(() => {
+        if (!active || !mapNode.current) return;
         map.current = new google.maps.Map(mapNode.current!, {
           center: INDIA,
           zoom: 5,
@@ -561,13 +582,21 @@ export default function App() {
           ],
         });
         renderer.current = new WalkingRouteRenderer(map.current);
+        google.maps.event.addListenerOnce(map.current, "tilesloaded", () => window.clearTimeout(timer));
         setMapsReady(true);
       })
-      .catch(() => {
-        setMapsFailed(true);
-        setNotice("Google Maps failed to load. Check the API key and enabled APIs.");
-      });
+      .catch(fail);
+    return () => { active = false; window.clearTimeout(timer); observer.disconnect(); if (browserWindow.gm_authFailure === fail) browserWindow.gm_authFailure = previousAuthFailure; };
   }, []);
+
+  useEffect(() => {
+    if (!mapsFailed || !navigator.geolocation) return;
+    const id = navigator.geolocation.watchPosition(position => {
+      setLocation({ lat: position.coords.latitude, lng: position.coords.longitude });
+      setLocationState("tracking");
+    }, () => setLocationState("unavailable"), { maximumAge: 30_000, timeout: 10_000 });
+    return () => navigator.geolocation.clearWatch(id);
+  }, [mapsFailed]);
 
   useEffect(() => {
     if (!mapsReady || !map.current) return;
@@ -742,19 +771,28 @@ export default function App() {
   }, [mapsReady, sightingsReady, sightings, testMode, demoMode, manualSightings]);
 
   useEffect(() => {
-    if (!mapsReady || !demoMode) return;
+    if (!mapsReady || testMode) return;
     let active = true;
+    const center = location || { lat: 28.4589, lng: 77.4947 };
+    const cacheKey = `pawlytics:care:v2:${demoMode ? "demo" : "live"}:${center.lat.toFixed(1)}:${center.lng.toFixed(1)}`;
     void (async () => {
       try {
+        try {
+          const cached = JSON.parse(sessionStorage.getItem(cacheKey) || "null");
+          if (cached && Date.now() - cached.savedAt < 15 * 60_000 && Array.isArray(cached.places) && cached.places.length) {
+            if (active) setCarePlaces(cached.places);
+            return;
+          }
+        } catch { /* Storage may be unavailable in private browsers. */ }
         const { Place } = (await google.maps.importLibrary("places")) as google.maps.PlacesLibrary;
-        const batches = await Promise.all(
+        const batches = await Promise.allSettled(
           CARE_CATEGORIES.map(async (category) => {
             const { places } = await Place.searchByText({
-              textQuery: category.query,
+              textQuery: location && !demoMode ? category.query.replace(/ near IILM University Greater Noida/gi, "").trim() : category.query,
               fields: ["id", "displayName", "formattedAddress", "location", "rating", "userRatingCount", "nationalPhoneNumber", "internationalPhoneNumber", "googleMapsURI", "photos"],
-              locationBias: { center: { lat: 28.4589, lng: 77.4947 }, radius: 18_000 },
+              locationBias: { center, radius: 18_000 },
               maxResultCount: 10,
-              region: "IN",
+              region: demoMode ? "IN" : undefined,
               language: "en",
             });
             return places.flatMap((place): CarePlace[] => {
@@ -780,17 +818,20 @@ export default function App() {
         );
         // A provider can legitimately appear under multiple toggles (for
         // example, a hospital that also provides rabies vaccination).
-        if (active) setCarePlaces(batches.flat().slice(0, 50));
+        const places = batches.flatMap(batch => batch.status === "fulfilled" ? batch.value : []).slice(0, 50);
+        if (active) setCarePlaces(places);
+        if (places.length) {
+          try { sessionStorage.setItem(cacheKey, JSON.stringify({ savedAt: Date.now(), places })); } catch { /* Browsing works without storage. */ }
+        }
       } catch (error) {
-        console.error("demo-care-places", error);
-        if (active) setNotice("Nearby animal-care directory is temporarily unavailable.");
+        console.error("care-places", error);
       }
     })();
     return () => { active = false; };
-  }, [mapsReady, demoMode]);
+  }, [mapsReady, demoMode, testMode, location]);
 
   useEffect(() => {
-    if (!mapsReady || !demoMode || !map.current) return;
+    if (!mapsReady || !map.current) return;
     const clear = () => {
       careMarkers.current.forEach((marker) => (marker.map = null));
       careMarkers.current = [];
@@ -818,7 +859,7 @@ export default function App() {
     render();
     const listener = map.current.addListener("idle", render);
     return () => { listener.remove(); clear(); };
-  }, [mapsReady, demoMode, carePlaces, careFilters]);
+  }, [mapsReady, carePlaces, careFilters]);
 
   useEffect(() => {
     if (
@@ -939,6 +980,7 @@ export default function App() {
     } catch (err) {
       const code =
         typeof err === "object" && err && "code" in err ? String(err.code) : "";
+      if (code === "auth/multi-factor-auth-required") { setMfaError(err as MultiFactorError); return; }
       if (
         code.includes("popup-blocked") ||
         code.includes("operation-not-supported-in-this-environment") ||
@@ -980,6 +1022,7 @@ export default function App() {
     ? [...incentiveDemoReports, ...myReports]
     : myReports;
 
+  if (mfaError) return <MfaSignIn error={mfaError} close={() => setMfaError(null)} />;
   if (window.location.pathname.startsWith("/demo/watch"))
     return <WatchDemo />;
   if (window.location.pathname.startsWith("/demo/authority"))
@@ -989,7 +1032,16 @@ export default function App() {
 
   return (
     <main ref={appShell} className={`app-shell${demoMode ? " demo-shell" : ""}${fullscreen ? " immersive" : ""}`}>
-      <div ref={mapNode} className="map" />
+      <div ref={mapNode} className="map" style={mapsFailed ? { visibility: "hidden" } : undefined} />
+      {mapsFailed && <Suspense fallback={<div className="setup-state">Loading the fallback map…</div>}><FallbackMap
+        sightings={activeRisk}
+        location={location}
+        onSelect={sighting => setSelected({ id: `fallback-${sighting.id}`, lat: sighting.lat, lng: sighting.lng, totalDogs: Math.max(1, sighting.dogCount || 1), severity: (sighting.dogCount || 1) >= 5 ? "high" : "medium", reports: [sighting], lastSeen: sightingDate(sighting.createdAt) })}
+        onMapTap={testMode ? point => {
+          if (originPlacementMode) { setLocation(point); setOriginPlacementMode(false); setLocationState("tracking"); }
+          else if (placementMode) { setManualSightings(current => [...current, { ...point, id: `manual-${Date.now()}`, description: "Manually placed test danger zone", severity: "high", dogCount: 3, createdAt: new Date(), verificationStatus: "approved" }]); setPlacementMode(false); }
+        } : undefined}
+      /></Suspense>}
       {import.meta.env.VITE_GOOGLE_MAPS_API_KEY && !initialMapReady && !mapsFailed && (
         <MapLoadingDog />
       )}
@@ -1212,10 +1264,15 @@ export default function App() {
           )}
         </>
       )}
-      {demoMode && (
+      {(
         <div className="care-filters" aria-label="Nearby animal care filters">
           {CARE_CATEGORIES.map((category) => {
             const Icon = category.id === "emergency" ? Ambulance : category.id === "hospital" ? Hospital : category.id === "clinic" ? Stethoscope : category.id === "ngo" ? HandHeart : Syringe;
+            const count = carePlaces.filter((place) => place.category === category.id).length;
+            if (!count) {
+              const query = location ? `${category.label} near ${location.lat},${location.lng}` : `${category.label} near me`;
+              return <a key={category.id} href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`} target="_blank" rel="noreferrer" aria-label={`Search ${category.label} in Google Maps`}><Icon size={13} /><span>{category.label}</span><b>Map</b></a>;
+            }
             return (
               <button
                 key={category.id}
@@ -1230,7 +1287,7 @@ export default function App() {
               >
                 <Icon size={13} />
                 <span>{category.label}</span>
-                <b>{carePlaces.filter((place) => place.category === category.id).length}</b>
+                <b>{count}</b>
               </button>
             );
           })}
@@ -1398,7 +1455,8 @@ export default function App() {
       {notice && (
         <StatusNotice message={notice} close={() => setNotice("")} />
       )}
-      {routeOpen && (
+      {routeOpen && mapsFailed && <Suspense fallback={null}><FallbackRouteSheet location={location} close={() => setRouteOpen(false)} /></Suspense>}
+      {routeOpen && !mapsFailed && (
         <RouteSheet
           map={map.current}
           renderer={renderer.current}
@@ -1457,7 +1515,9 @@ function AuthorityPortal({
 }) {
   const [context, setContext] = useState<{
     platformAdmin: boolean;
-    memberships: Array<{ organizationId: string; role: string }>;
+    memberships: Array<{ organizationId: string; role: string; mfaRequired?: boolean }>;
+    mfaEnrolled: boolean;
+    mfaSatisfied: boolean;
   } | null>(null);
   const [organizationId, setOrganizationId] = useState("");
   const [tab, setTab] = useState<
@@ -1511,7 +1571,7 @@ function AuthorityPortal({
       .catch(() => setNotice("Authority access could not be loaded."));
   }, [user]);
   useEffect(() => {
-    if (!organizationId) return;
+    if (!organizationId || !context || ((context.platformAdmin || context.memberships.some(member => member.mfaRequired !== false)) && !context.mfaSatisfied)) return;
     const stops = [
       onSnapshot(
         query(
@@ -1538,7 +1598,7 @@ function AuthorityPortal({
       ),
     ];
     return () => stops.forEach((stop) => stop());
-  }, [organizationId]);
+  }, [organizationId, context]);
   async function openReview(reportId: string) {
     try {
       const snap = await getDoc(doc(db, "reports", reportId));
@@ -1600,6 +1660,7 @@ function AuthorityPortal({
         </div>
       </main>
     );
+  if ((context.platformAdmin || context.memberships.some(member => member.mfaRequired !== false)) && (!context.mfaEnrolled || !context.mfaSatisfied)) return <AuthorityMfa user={user} enrolled={context.mfaEnrolled} />;
   const openReviews = reviews.filter((r) => r.status === "open").length,
     pendingActions = actions.filter(
       (a) => !["completed", "cancelled"].includes(a.status),

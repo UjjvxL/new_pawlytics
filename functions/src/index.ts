@@ -15,6 +15,7 @@ import { defineSecret } from "firebase-functions/params";
 import { logger } from "firebase-functions";
 import sharp from "sharp";
 import tzLookup from "tz-lookup";
+import { hasAuthoritySecondFactor } from "./authority-policy";
 import {
   extractImageMetadata,
   optionalNumber,
@@ -259,9 +260,12 @@ async function authority(
   roles: string[],
 ) {
   const auth = requireAuth(request);
-  if (auth.token.platformAdmin === true)
+  if (auth.token.platformAdmin === true) {
+    if (!hasAuthoritySecondFactor(auth.token)) throw new HttpsError("permission-denied", "Complete multi-factor sign-in for administrative access.");
     return { auth, member: { role: "platform_admin", jurisdictionIds: [] } };
+  }
   const member = await membership(auth.uid, organizationId);
+  if (member.mfaRequired !== false && !hasAuthoritySecondFactor(auth.token)) throw new HttpsError("permission-denied", "Complete multi-factor sign-in for this authority account.");
   if (!roles.includes(member.role))
     throw new HttpsError(
       "permission-denied",
@@ -314,7 +318,7 @@ export const bootstrapUser = onCall(
               ? grant.jurisdictionIds.slice(0, 30)
               : [],
             status: "active",
-            mfaRequired: false,
+            mfaRequired: true,
             provisionedFromGrant: true,
             createdAt: FieldValue.serverTimestamp(),
             updatedAt: FieldValue.serverTimestamp(),
@@ -1777,6 +1781,8 @@ export const getAuthorityContext = onCall(
         .get();
     return {
       platformAdmin: a.token.platformAdmin === true,
+      mfaEnrolled: Boolean((await getAuth().getUser(a.uid)).multiFactor?.enrolledFactors.length),
+      mfaSatisfied: hasAuthoritySecondFactor(a.token),
       memberships: members.docs.map((d) => ({
         organizationId: d.ref.parent.parent!.id,
         ...d.data(),
@@ -1793,6 +1799,7 @@ export const createOrganization = onCall(
         "permission-denied",
         "Platform administrator required.",
       );
+    if (!hasAuthoritySecondFactor(a.token)) throw new HttpsError("permission-denied", "Complete multi-factor sign-in for administrative access.");
     const name = cleanText(request.data?.name, 120),
       city = cleanText(request.data?.city, 80);
     if (name.length < 3 || city.length < 2)
@@ -1814,7 +1821,7 @@ export const createOrganization = onCall(
       role: "org_admin",
       jurisdictionIds: [],
       status: "active",
-      mfaRequired: false,
+      mfaRequired: true,
       createdAt: FieldValue.serverTimestamp(),
     });
     batch.set(db.doc(`organizations/${id}/settings/current`), {
@@ -1914,7 +1921,7 @@ export const acceptAuthorityInvite = onCall(
       role: data.role,
       jurisdictionIds: data.jurisdictionIds || [],
       status: "active",
-      mfaRequired: false,
+      mfaRequired: true,
       createdAt: FieldValue.serverTimestamp(),
     });
     batch.update(ref, {

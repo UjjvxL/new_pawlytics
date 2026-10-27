@@ -41,6 +41,7 @@ beforeEach(async () => {
       setDoc(doc(db, "organizations/org-a/members/reviewer"), {
         status: "active",
         role: "reviewer",
+        mfaRequired: true,
       }),
       setDoc(doc(db, "reviewCases/review-one"), {
         organizationId: "org-a",
@@ -75,9 +76,10 @@ test("public safety data is readable but raw evidence is private", async () => {
 test("report reads are limited to owner, platform admin, or matching active authority", async () => {
   const owner = environment.authenticatedContext("owner");
   const stranger = environment.authenticatedContext("stranger");
-  const reviewer = environment.authenticatedContext("reviewer");
+  const reviewer = environment.authenticatedContext("reviewer", { firebase: { sign_in_second_factor: "phone" } });
   const platformAdmin = environment.authenticatedContext("admin", {
     platformAdmin: true,
+    firebase: { sign_in_second_factor: "phone" },
   });
 
   await assertSucceeds(getDoc(doc(owner.firestore(), "reports/report-owner")));
@@ -88,6 +90,16 @@ test("report reads are limited to owner, platform admin, or matching active auth
     getDoc(doc(platformAdmin.firestore(), "reports/report-owner")),
   );
   await assertFails(getDoc(doc(stranger.firestore(), "reports/report-owner")));
+});
+
+test("an authority enrollment or admin claim alone cannot bypass second-factor verification", async () => {
+  const unverifiedReviewer = environment.authenticatedContext("reviewer").firestore();
+  const unverifiedAdmin = environment.authenticatedContext("admin", { platformAdmin: true }).firestore();
+  await assertFails(getDoc(doc(unverifiedReviewer, "reports/report-owner")));
+  await assertFails(getDoc(doc(unverifiedReviewer, "reviewCases/review-one")));
+  await assertFails(getDoc(doc(unverifiedAdmin, "reports/report-owner")));
+  const verifiedAdmin = environment.authenticatedContext("admin", { platformAdmin: true, firebase: { sign_in_second_factor: "phone" } }).firestore();
+  await assertSucceeds(getDoc(doc(verifiedAdmin, "reviewCases/review-one")));
 });
 
 test("clients cannot forge report, public map, or authority records", async () => {

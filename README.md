@@ -108,3 +108,37 @@ Starting the frontend does not deploy the backend; real report verification need
 ## Safety notes before public launch
 
 Gemini verification is a moderation signal, not proof that a report is genuine or a route is safe. Rate limits, duplicate detection, reporter trust, privacy controls, expiry, and human review are implemented. Before an open public launch, configure a reCAPTCHA Enterprise site key and enable Firebase App Check enforcement, raise Gemini production quota, add monitoring/alerts and backups, and complete legal/privacy review. Do not market routes as guaranteed safe.
+
+## Reference-site feature comparison
+
+The reference is `https://pawlytics-506516.web.app/`; this repository deploys to `https://pawlytics-84071.web.app/`. The comparison covered anonymous desktop and phone flows, both deployed browser bundles, and the existing repository's authenticated flows. Existing reference users, reports, private evidence, and authority memberships are not migrated.
+
+| Reference feature | Status in this repository |
+| --- | --- |
+| Live dog-sighting map, grouped risk zones, photo cards and fullscreen | Present; live empty states stay empty rather than showing sample reports |
+| Current location, destination suggestions, walking alternatives and hotspot avoidance | Present; migrated to the supported Routes API for the new project |
+| Nearby emergency vets, hospitals, clinics, rescue NGOs and rabies care on the main map | Restored outside demo mode, with location bias, short session caching and per-category Google Maps fallback links |
+| Place photos, ratings, addresses, phone calls and route handoff | Present, now reachable from the main map |
+| OpenStreetMap when Google Maps fails or reaches quota | Restored; live sightings and care links remain available, with an explicit external walking-directions handoff |
+| Google sign-in, private citizen profiles, optional phone verification and privacy controls | Present; new-project Google and Phone providers configured |
+| Camera/library evidence, multilingual speech, original metadata and upload stages | Present |
+| Server-side Gemini verification, duplicate/rate checks, review and sanitized thumbnails | Present; the configured Vertex express-mode key is supported |
+| Report notifications, history, AI explanations, map links and downloadable receipts | Present |
+| Impact points, trust tier, streaks, reward eligibility and incentive demo accounts | Present; demo rewards remain client-only and labelled |
+| Account export and delayed deletion/cancellation | Present |
+| Bite first aid, dog-approach guidance, rabies-care handoff and WHO reference | Present |
+| Authority invitations, organization/role access, review decisions and evidence | Present |
+| Authority MFA enrollment and second-factor sign-in | Restored with Firebase SMS enrollment/challenge UI, server checks and Firestore enforcement |
+| Authority actions, team management and reviewed configuration changes | Present |
+| NCR demonstration: 480 dogs, 96 hotspots, route presets and density rendering | Present at `/demo` |
+| NCR command center, district performance, incident queue, ABC/rabies and care network | Present at `/demo/authority` |
+| CCTV concept video, tracking overlay, metrics and playback controls | Present; explicitly simulated |
+| Watch risk overview, walking presets, sighting confirmation, share and SOS | Restored at `/demo/watch`; demo sightings are explicitly local simulations |
+| Watch map, destination search and real walking directions | Retained at `/demo/watch/map` |
+| Manual dog placement, start positioning and safe-routing comparison | Present at `/test` |
+
+Authority MFA uses the Firebase-verified second-factor claim. Enrollment alone or an administrative custom claim does not authorize protected evidence. Real SMS delivery requires the account owner's phone and verification code; automated tests never send SMS.
+
+## Merge and deployment
+
+`.github/workflows/deploy.yml` validates pull requests with lint, backend tests, isolated security-rule emulators, desktop/phone browser tests and a production build. A push to `main` deploys Hosting, Functions, Firestore rules/indexes and Storage rules to `pawlytics-84071` using GitHub OIDC Workload Identity Federation. No service-account private key or Gemini key is stored in GitHub. Public browser configuration and the deployment provider/service-account identifiers are repository variables; Gemini remains in Google Secret Manager.

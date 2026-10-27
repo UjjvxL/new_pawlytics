@@ -3,11 +3,13 @@ service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
     function owns(uid) { return signedIn() && request.auth.uid == uid; }
-    function platformAdmin() { return signedIn() && request.auth.token.platformAdmin == true; }
+    function secondFactor() { return signedIn() && request.auth.token.get('firebase', {}).get('sign_in_second_factor', '') in ['phone', 'totp']; }
+    function platformAdmin() { return signedIn() && request.auth.token.platformAdmin == true && secondFactor(); }
     function activeMember(orgId) {
       return signedIn() && orgId != null
         && exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid))
-        && get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.status == 'active';
+        && get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.status == 'active'
+        && (get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.get('mfaRequired', true) == false || secondFactor());
     }
 
     match /publicSightings/{id} { allow read: if true; allow write: if false; }
