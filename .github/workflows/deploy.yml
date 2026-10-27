@@ -44,6 +44,12 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm ci --prefix functions --no-audit --no-fund
       - run: npx playwright install --with-deps chrome
+      - name: Keep isolated emulator tests independent of production secrets
+        run: |
+          node --input-type=module <<'JS'
+          import { writeFileSync } from 'node:fs';
+          writeFileSync('functions/.secret.local', 'GEMINI_API_KEY=emulator-only-unavailable\n', { mode: 0o600 });
+          JS
       - run: npm test
       - run: npm run build
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
